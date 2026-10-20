@@ -59,7 +59,9 @@ Log of ongoing work and decisions, so a new session can pick up where the last o
     * Opponent vs. opponent, 150 points: every point ends, nobody leaves their half, the same seeds play the same match. Median rally 4 hits, longest 25.
 * Planted six bugs one at a time and restored each: lob at 30° (33 failures), scoring swapped (5), aims at you (5), far body can cross the net (3), 1.5 s reaction (3), serve never changes side (2). Clean run passes after restoring.
 * Opened all three scenes headless with no errors. Rendered the match in demo mode under Xvfb: serve, rallies and scoring show, HUD hit counts update, opponent drawn in orange.
-* Not played by hand yet. Not run on Windows yet. Test run went from about 3 s to about 16 s, mostly the 150 point match.
+* JD ran `run_tests.bat` on Windows: ALL TESTS PASSED (4,243 Godot checks plus the Python half).
+* JD played the match by hand on Windows. Playtest notes pending.
+* Test run went from about 3 s to about 16 s, mostly the 150 point match.
 
 ### Deferred / Follow-up
 
