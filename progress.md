@@ -4,15 +4,15 @@ Log of ongoing work and decisions, so a new session can pick up where the last o
 
 ## Project status (as of 2026-10-19)
 
-* **Current priority:** play 10 minutes against the retuned opponent (Session 13) with the overlay on (Tab), then send the CSV from `logs/`. Check whether crosscourt still feels free. Then the volley protocol from Session 8. Run `run_tests.bat` after every change to the ball, player, rally or opponent.
-* **Playcentric step:** 5. Playtest 1, first pass done on the practice court. Match build ready for the real pass.
+* **Current priority:** zone-based opponent shots, starting with a wider lob trigger (3.5 m to about 6 m), then shot buttons with contact quality. Plan and order in `design/glass-panels.md`. Run `run_tests.bat` after every change to the ball, player, rally or opponent.
+* **Playcentric step:** 5. Playtest 1 in the match done with the overlay (Session 15). Back to step 4 changes the playtest asked for, one per playtest.
 * **Known blockers:** None.
 * **Active known issues:**
     * Padel origin and Balatro release date in the goals doc came from memory and still need checking (from Session 1).
     * Sim tuning (glass and mesh restitution, ball bounce) is guessed and unchecked against real footage (from Session 2).
     * The "ball died" rule never fired in 60,000 random launches. It may be dead code (from Session 4).
     * **Ready to test: volley vs. bounce.** The opponent now lobs when you stand within 3.5 m of the net, and the match HUD counts your volleys, bounce hits and glass hits. Run the Session 8 protocol in the match (from Session 7, opponent in Session 10).
-    * Playtest 1 in the match: crossing the ball beat the opponent too easily, and it whiffed easy balls. Cause was the miss roll, not positioning. Retuned in Session 13, needs a hand playtest (from Session 11).
+    * Playtest 1 (Session 15): you volley 68 of 110 shots and play 4 off the glass, the opponent never lobs you (your volleys sit 4.4 m from the net, outside its 3.5 m trigger), and nobody ever misses a shot. Every swing makes a perfect shot. See `design/glass-panels.md`.
     * Match rules are simplified: the serve changes sides every point, serves are auto-aimed into the box (no service faults), and the score is a plain point count (from Session 10).
 * **Technical debt:**
     * A GDScript runtime error inside the suite prints SCRIPT ERROR but doesn't fail the run. Session 14 hit one that only showed in the log. Make the runner fail on it (from Session 14).
@@ -20,6 +20,58 @@ Log of ongoing work and decisions, so a new session can pick up where the last o
     * `shot_planner.gd` (moved out of `rally.gd`, now shared by you, the opponent and the practice court) plans shots with its own light copy of the ball's flight (drag, gravity, net). Change the model's tuning and the planner drifts. The return and lob grid tests catch it (from Session 7, moved in Session 10).
     * The practice court and the match reuse the `lab_*` actions (Space, T, R, arrows). The match uses `lab_speed` for slow motion, so a second scene needs them now. Rename to shared names soon. `lab_replay` moved from Start to R3 when Start became the menu (from Session 7, Session 11).
     * `tests/golden_random.json` is tracked but rewritten on every test run. Runs on different machines change the last digit of some floats, so git shows it as modified. Harmless (the Godot check allows 1e-9 m), but decide whether to gitignore it (from Session 9).
+
+---
+
+## 2026-10-19 (Session 15) – Playtest 1 logged, walls unused, glass panels and shot buttons planned [Playtest] [Design]
+
+### Handoff
+
+* **Result:** JD's first match with the overlay is logged (32 points, 14 to 18). The retune holds, but the walls are unused and nobody ever misses. New design note `design/glass-panels.md` plans shot buttons, contact quality and glass panels.
+* **Why it matters:** "walls feel like a tool" is failing. 4 of 110 shots came off the glass. The cause is that every swing makes a perfect shot, so waiting for the wall never pays.
+* **Next recommended action:** widen the opponent's lob trigger to about 6 m (zone-based shots, step 1 in the design note), playtest, compare glass hits in the log.
+
+### Accomplished
+
+* Read the log `logs/match_2026-10-19T23-03-53.csv` (local, gitignored):
+    * Session 13 retune holds: your 14 points all came from whiffs, 8 working and 6 stretched, 0 easy. Crosscourt 30 hit, 4 won. Line 65 hit, 8 won (3 from the net). Mid 15 hit.
+    * Your hits: 68 volleys, 38 after the bounce, 4 off the glass. Volleys averaged 4.4 m from the net (y 5.6), range 2.4 to 6.1 m.
+    * Opponent lobs: 0. You stayed outside the 3.5 m net zone.
+    * All 32 points ended "winner: second bounce". No net, no out, from either side.
+    * 4 points lost straight off the opponent's serve. The log can't say why yet.
+* Design direction from JD: the game doesn't aim to be faithful padel. Plain padel is the base, powerups and the roguelite structure take it elsewhere.
+* JD's idea: the back glass split into panels (2, 3 or 6) with symbols. A legal ball hitting a panel triggers a powerup or event that can help or hurt either side, so letting a ball reach the glass becomes a decision.
+* `design/glass-panels.md` — **New**: playtest findings, shot types and button mapping options, contact quality, glass panels (counts, effect ideas, fairness rules, roguelite hooks), opponent shot choice by zone, serve notes, build order, open questions.
+* `scripts/match.gd`: writes a `.gdignore` into the logs folder. Godot was importing the CSV as a translation (`logs/*.csv.import`).
+
+#### Decisions
+* Faithful padel is not a goal. Realism serves feel and readability.
+* Build order: zone-based opponent shots, then shot buttons with contact quality, then a three-panel glass prototype, serve tuning any time. One change per playtest.
+* Shot buttons start as two (drive, lob) plus an automatic overhead above the band.
+
+### Verified
+
+* Log read with a script over the CSV. Numbers above come from it.
+* `.gdignore`: ran the match headless, the folder gets the file, then an editor scan imported nothing from `logs/`.
+* Design note: not built, nothing to run.
+
+### Deferred / Follow-up
+
+1. Wider lob trigger, then zone-based shot choice for the opponent.
+2. Shot buttons and contact quality.
+3. Glass panel prototype.
+4. Log failed swings and your position on the serve before tuning the serve.
+5. The old `logs/*.csv.import` on JD's machine can be deleted by hand.
+
+### Files Touched
+
+* `design/glass-panels.md` — **New** — shot types, contact quality, glass panels plan
+* `scripts/match.gd` — **Edit** — `.gdignore` in the logs folder
+* `progress.md` — **Edit** — this entry and status block
+
+### Status Update
+
+* Priority moved to zone-based opponent shots, then shot buttons. Playcentric step notes playtest 1 done. Replaced the Session 11 known issue with the Session 15 findings.
 
 ---
 

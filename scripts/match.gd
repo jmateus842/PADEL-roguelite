@@ -191,6 +191,9 @@ func _watch_rules() -> void:
 func _open_log() -> void:
 	var dir := "res://logs" if OS.has_feature("editor") else "user://logs"
 	DirAccess.make_dir_recursive_absolute(ProjectSettings.globalize_path(dir))
+	# keep Godot from importing the logs: it reads any .csv as a translation
+	if not FileAccess.file_exists(dir + "/.gdignore"):
+		FileAccess.open(dir + "/.gdignore", FileAccess.WRITE)
 	var stamp := Time.get_datetime_string_from_system().replace(":", "-")
 	var path := "%s/match_%s%s.csv" % [dir, stamp, "_watch" if stand_in else ""]
 	_log = FileAccess.open(path, FileAccess.WRITE)
