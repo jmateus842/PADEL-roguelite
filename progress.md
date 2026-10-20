@@ -4,7 +4,7 @@ Log of ongoing work and decisions, so a new session can pick up where the last o
 
 ## Project status (as of 2026-10-19)
 
-* **Current priority:** make the opponent harder to beat with a plain crosscourt drive (Session 11 playtest), then the volley protocol from Session 8. Run `run_tests.bat` after every change to the ball, player, rally or opponent. Run `run_tests.bat` after every change to the ball, player or rally.
+* **Current priority:** make the opponent harder to beat with a plain crosscourt drive (Session 11 playtest), then the volley protocol from Session 8. Run `run_tests.bat` after every change to the ball, player, rally or opponent.
 * **Playcentric step:** 5. Playtest 1, first pass done on the practice court. Match build ready for the real pass.
 * **Known blockers:** None.
 * **Active known issues:**
