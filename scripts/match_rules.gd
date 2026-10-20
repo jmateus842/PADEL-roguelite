@@ -47,6 +47,10 @@ var rally_len := 0
 var longest_rally := 0
 ## what happened last point, for the HUD
 var last := ""
+## the same, in parts: who won, the ball model's result, whose shot ended it
+var last_winner := ""
+var last_result := ""
+var last_by := ""
 ## your hits by how the ball reached you, and the contact heights
 var your_hits := {"volley": 0, "bounce": 0, "glass": 0}
 var your_heights: Array[float] = []
@@ -187,6 +191,9 @@ func on_point_over(result: String) -> void:
 	score[winner] += 1
 	points += 1
 	longest_rally = maxi(longest_rally, rally_len)
+	last_winner = winner
+	last_result = result
+	last_by = hitter
 	var who := "You" if winner == "near" else "Opponent"
 	var by := "your" if hitter == "near" else "their"
 	last = "%s won the point (%s shot: %s, %d hits)" % [who, by, result, rally_len]

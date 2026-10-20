@@ -33,7 +33,12 @@ var flipped := false
 ## the ball (a hit), which ends the substeps for this tick
 var hit_check: Callable
 var _acc := 0.0
-var _announced := false
+var _announced := true
+
+
+## until the first play() the ball sits idle: no stepping, nothing drawn
+func _init() -> void:
+	model.end = "idle"
 
 
 func play(start: Array, vel: Array, kick := 1.0, from_far := false) -> void:

@@ -5,9 +5,12 @@ extends CanvasLayer
 ## closes with Start, Esc or B. Built in code, so match.tscn stays small.
 
 signal mode_picked(demo: bool)
+signal stats_toggled(on: bool)
 
 var _panel: PanelContainer
 var _first: Button
+var _stats_button: Button
+var _stats_on := false
 
 
 func _ready() -> void:
@@ -39,6 +42,8 @@ func _ready() -> void:
 	_first = _button(box, "Resume", close)
 	_button(box, "Play vs the opponent", func() -> void: _pick(false))
 	_button(box, "Watch opponent vs opponent", func() -> void: _pick(true))
+	_stats_button = _button(box, "", func() -> void: stats_toggled.emit(not _stats_on))
+	set_stats_label(false)
 	var hint := Label.new()
 	hint.text = "A / Enter pick     Start / Esc / B close"
 	hint.add_theme_font_size_override("font_size", 14)
@@ -55,6 +60,12 @@ func _button(box: VBoxContainer, text: String, on_press: Callable) -> Button:
 	b.pressed.connect(on_press)
 	box.add_child(b)
 	return b
+
+
+## the scene calls this whenever the stats panel changes, Tab included
+func set_stats_label(on: bool) -> void:
+	_stats_on = on
+	_stats_button.text = "Stats panel: %s" % ("on" if on else "off")
 
 
 func is_open() -> bool:

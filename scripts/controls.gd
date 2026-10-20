@@ -34,6 +34,8 @@ const ACTIONS := {
 	# opens and closes the match menu. Inside the menu, Godot's built-in ui_*
 	# actions move and pick (arrows or D-pad or stick, Enter or A, Esc or B)
 	"menu": {"keys": [KEY_ESCAPE], "buttons": [JOY_BUTTON_START]},
+	# match stats panel. On a gamepad it's in the menu
+	"stats": {"keys": [KEY_TAB]},
 }
 
 ## true once the last thing you touched was a gamepad. The HUD uses it

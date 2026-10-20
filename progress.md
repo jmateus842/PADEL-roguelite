@@ -22,6 +22,42 @@ Log of ongoing work and decisions, so a new session can pick up where the last o
 
 ---
 
+## 2026-10-19 (Session 12) – Cleaner match HUD, stats panel is a toggle [UI]
+
+### Handoff
+
+* **Result:** the match screen has a centered court, a scoreboard card on the left, and a stats card on the right that's hidden until you toggle it. Tab toggles it on keyboard. On a gamepad it's "Stats panel" in the Start menu.
+* **Why it matters:** the play screen now shows what a player needs (score, serve, what ended the last point). The debug numbers stay one press away for playtests.
+* **Next recommended action:** tune the opponent against crosscourt drives (Session 11).
+
+### Accomplished
+
+* `scripts/match.gd`: HUD built in code. Scoreboard shows the mode, a big score (you in white, the opponent in orange, same as the bodies), the serve or rally state, and the last point in plain words ("their shot, two bounces"). Stats card: rally, speed, your hits by type, average contact height, opponent lobs and whiffs, ball height, band and reach. Controls hint along the bottom. Height gauge sits next to the court.
+* `stats_on` is a static var, so the panel stays as you left it when the menu restarts the match.
+* `scripts/match_menu.gd`: "Stats panel: on/off" button.
+* `scripts/controls.gd`: `stats` action on Tab.
+* `scripts/match_rules.gd`: `last_winner`, `last_result` and `last_by` for the HUD.
+* `scenes/match.tscn`: court moved to the center, old Info label removed.
+* `scripts/ball.gd`: the ball starts idle until its first `play()`. Before, it stepped a dead ball at the court corner and drew a yellow dot there before the first serve.
+
+### Verified
+
+* Full suite on Godot 4.5.stable (Linux, cloud): all good (4,255 checks).
+* Rendered the match under Xvfb with fake key presses: serve screen, Tab shows the stats card, Esc menu shows the stats button. Fixed score labels that wrapped one letter per line on the first render.
+* All three scenes open headless with no errors. Not tried by hand on Windows yet.
+
+### Files Touched
+
+* `scripts/match.gd`, `scripts/match_menu.gd`, `scripts/match_rules.gd`, `scripts/controls.gd`, `scripts/ball.gd` — **Edit**
+* `scenes/match.tscn` — **Edit** — court centered, Info label removed
+* `progress.md` — **Edit** — this entry
+
+### Status Update
+
+* No change to the status block. Priority stays on the crosscourt tuning.
+
+---
+
 ## 2026-10-19 (Session 11) – Match menu on Start, first match playtest [Playtest] [UI]
 
 ### Handoff
