@@ -4,7 +4,7 @@ Log of ongoing work and decisions, so a new session can pick up where the last o
 
 ## Project status (as of 2026-10-19)
 
-* **Current priority:** pick the next step after the first practice session (it feels good to play). Likely a basic opponent, which also gives the volley vs. bounce choice its stakes. Run `run_tests.bat` after every change to the ball, player or rally.
+* **Current priority:** build a basic opponent on the far half. It also gives the volley vs. bounce choice its stakes. Run `run_tests.bat` after every change to the ball, player or rally.
 * **Playcentric step:** 5. Playtest 1, first pass done. Volley question parked (see Session 8).
 * **Known blockers:** None.
 * **Active known issues:**
@@ -16,7 +16,43 @@ Log of ongoing work and decisions, so a new session can pick up where the last o
     * The `SHOTS` table lives in both `sim/wall_shots.py` and `scripts/shots.gd`. `tests/test_sim.py` now fails if they differ, so drift gets caught, but you still edit both (from Session 3).
     * `rally.gd` plans returns with its own light copy of the ball's flight (drag, gravity, net). Change the model's tuning and the planner drifts. The return grid test catches it (from Session 7).
     * The practice court reuses the `lab_*` actions (Space, T, R, arrows). Rename them to shared names once a second scene needs them for real (from Session 7).
-    * `scripts/check_shots.gd` overlaps with the named shots suite in `tests/godot_tests.gd`. The new suite now passes on Windows, so delete it (from Session 4).
+    * `tests/golden_random.json` is tracked but rewritten on every test run. Runs on different machines change the last digit of some floats, so git shows it as modified. Harmless (the Godot check allows 1e-9 m), but decide whether to gitignore it (from Session 9).
+
+---
+
+## 2026-10-19 (Session 9) – Project under git, old shot check removed [Tooling]
+
+### Handoff
+
+* **Result:** the folder is a git repo on `main` with two commits. `scripts/check_shots.gd` is gone.
+* **Why it matters:** the opponent is the next big change, and now there's a clean point to roll back to.
+* **Next recommended action:** build the basic opponent on the far half.
+
+### Accomplished
+
+* `git init -b main`. Author set in the repo config (Juan Diego Mateus Garibaldi). `core.autocrlf` is false so Windows line endings stay as they are.
+* First commit: everything from Sessions 1 to 8. `__pycache__/` added to `.gitignore` and left out.
+* Second commit: deleted `scripts/check_shots.gd` and its `.uid`. Nothing else referenced it. `tests/godot_tests.gd` suite 1 covers the same check.
+
+### Verified
+
+* Python half of the tests passes after the delete. Godot half not run (no Godot on the machine that made the change). Run `run_tests.bat` on Windows to confirm.
+
+### Deferred / Follow-up
+
+1. Run `run_tests.bat` on Windows.
+2. Basic opponent: far-half player, predicts the ball with `run_to_end()`, lobs when you stand near the net, simple point scoring.
+3. Decide on gitignoring `tests/golden_random.json`.
+
+### Files Touched
+
+* `.gitignore` — **Edit** — ignore `__pycache__/`
+* `scripts/check_shots.gd`, `scripts/check_shots.gd.uid` — **Delete** — replaced by the test suite
+* `progress.md` — **Edit** — this entry and status block
+
+### Status Update
+
+* Removed the `check_shots.gd` item from technical debt. Added the `golden_random.json` churn. Priority moves to the basic opponent.
 
 ---
 
