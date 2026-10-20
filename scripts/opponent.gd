@@ -62,6 +62,9 @@ var plan_t := 0.0
 var reachable := false
 ## 0 when it had all the time in the world, 1 when it barely made it
 var pressure := 0.0
+## pressure above STRAIN_FROM, 0 to 1. Drives the miss chance and the ring
+## under it in the match overlay
+var strain := 0.0
 ## rolled once per ball: this one it will let through
 var whiff := false
 var last_was_lob := false
@@ -93,7 +96,7 @@ func tick(delta: float) -> void:
 				target = body.pos()   # hasn't read the shot yet
 			else:
 				make_plan()
-				var strain := clampf((pressure - STRAIN_FROM) / (1.0 - STRAIN_FROM), 0.0, 1.0)
+				strain = clampf((pressure - STRAIN_FROM) / (1.0 - STRAIN_FROM), 0.0, 1.0)
 				whiff = rng.randf() < MISS_BASE + MISS_PRESSURE * strain * strain
 				if whiff:
 					whiffs += 1

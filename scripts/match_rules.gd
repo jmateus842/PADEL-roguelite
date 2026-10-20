@@ -14,6 +14,7 @@ extends RefCounted
 
 const BallModel := preload("res://scripts/ball_model.gd")
 const Planner := preload("res://scripts/shot_planner.gd")
+const Opponent := preload("res://scripts/opponent.gd")
 
 ## where the server stands, model coordinates (always the near half there)
 const SERVE_X := 7.0
@@ -26,6 +27,11 @@ const SERVE_SPEED := 14.0
 const RECEIVE_Y := 18.0
 ## the opponent serves this long after the point starts, s
 const AUTO_SERVE := 0.8
+## a shot landing within this many meters of the center line is "mid", and a
+## contact this close to it can't be crossed, m
+const MID_BAND := 1.0
+## the net zone: within this many meters of the net, the opponent lobs you
+const NET_ZONE := Opponent.LOB_WHEN
 
 var ball    # ball.gd
 var bodies := {}   # side -> player.gd
@@ -56,6 +62,29 @@ var your_hits := {"volley": 0, "bounce": 0, "glass": 0}
 var your_heights: Array[float] = []
 var opp_lobs := 0
 
+# --- playtest overlay and log (Session 14) ---
+## every hit this point, serve included. Each one: shot (its shot_id), side,
+## came (volley, bounce, glass, serve), kind (cross, line, mid, serve),
+## net (hit from the net zone), lob, x, y, z (contact, court), land_x,
+## land_y (first bounce, court), pressure and strain (the receiving brain's
+## read of it, -1 for you)
+var hits: Array[Dictionary] = []
+## your shots by kind, and the ones that won the point
+var tally := {
+	"cross": {"hit": 0, "won": 0},
+	"line": {"hit": 0, "won": 0},
+	"mid": {"hit": 0, "won": 0},
+	"net": {"hit": 0, "won": 0},
+}
+## the far brain's whiffs that gave you the point, by how stretched it was
+var whiff_tally := {"easy": 0, "working": 0, "stretched": 0}
+## points the opponent won with a lob over you
+var lobbed_at_net := 0
+## last point, for the HUD: its cause in words, and the whiff that gave it
+## away ("easy", "working", "stretched" or "")
+var last_cause := ""
+var last_whiff := ""
+
 
 func _init(ball_node, near_body, far_body) -> void:
 	ball = ball_node
@@ -69,6 +98,23 @@ func _init(ball_node, near_body, far_body) -> void:
 
 static func other(side: String) -> String:
 	return "far" if side == "near" else "near"
+
+
+## cross: contact and first bounce on opposite sides of the center line.
+## mid: lands near the center line. line: the rest. Court x for both
+static func shot_kind(contact_x: float, land_x: float) -> String:
+	if absf(land_x - 5.0) < MID_BAND:
+		return "mid"
+	if absf(contact_x - 5.0) >= MID_BAND and signf(contact_x - 5.0) != signf(land_x - 5.0):
+		return "cross"
+	return "line"
+
+
+## how stretched a brain was, from its strain (opponent.gd)
+static func strain_name(strain: float) -> String:
+	if strain <= 0.0:
+		return "easy"
+	return "working" if strain < 0.5 else "stretched"
 
 
 ## court position to the model coordinates of a hitter on `side`
@@ -116,6 +162,7 @@ func setup_serve() -> void:
 	state = "serve"
 	last_hitter = ""
 	rally_len = 0
+	hits.clear()
 	serve_wait = AUTO_SERVE
 	var sx := serve_x()
 	bodies[server].reset(to_court(server, sx, SERVE_Y))
@@ -138,6 +185,8 @@ func serve() -> bool:
 	var contact := [sx, SERVE_Y, SERVE_Z]
 	var target_x := BallModel.W - sx + signf(5.0 - sx) * 0.5
 	_launch(server, contact, Planner.plan(contact, target_x, SERVE_DEPTH, SERVE_SPEED))
+	var at := to_court(server, sx, SERVE_Y)
+	_record(server, Vector3(at.x, at.y, SERVE_Z), "serve")
 	return true
 
 
@@ -156,6 +205,7 @@ func try_hit() -> bool:
 		return false
 	var b := ball_court()
 	var contact := to_model(side, b)
+	var came := _how_it_came()
 	var vel: Array
 	if brains.has(side):
 		vel = brains[side].choose_shot(contact)
@@ -164,11 +214,55 @@ func try_hit() -> bool:
 	else:
 		vel = Planner.plan(contact, 5.0 + clampf(aim, -1.0, 1.0) * Planner.AIM_SPREAD)
 	if side == "near":
-		your_hits[_how_it_came()] += 1
+		your_hits[came] += 1
 		your_heights.append(b.z)
 	bodies[side].used_swing()
 	_launch(side, contact, vel)
+	_record(side, b, came)
 	return true
+
+
+## log the shot just launched: where it was hit, where it will first bounce,
+## what kind it is. Your shots go into the tally
+func _record(side: String, b: Vector3, came: String) -> void:
+	var land := _landing(side)
+	var receiver_brain = brains.get(other(side))
+	var rec := {
+		"shot": shot_id, "side": side, "came": came,
+		"kind": "serve" if came == "serve" else shot_kind(b.x, land.x),
+		"net": came != "serve" and to_model(side, b)[1] >= BallModel.NET_Y - NET_ZONE,
+		"lob": came != "serve" and brains.has(side) and brains[side].last_was_lob,
+		"x": b.x, "y": b.y, "z": b.z, "land_x": land.x, "land_y": land.y,
+		"pressure": -1.0, "strain": -1.0,
+	}
+	# the brain that just hit read this ball before it swung
+	if brains.has(side) and came != "serve":
+		rec.pressure = brains[side].pressure
+		rec.strain = brains[side].strain
+	hits.append(rec)
+	if side == "near" and came != "serve":
+		tally[rec.kind].hit += 1
+		if rec.net:
+			tally.net.hit += 1
+
+
+## first bounce of the ball just launched, court coordinates. If it never
+## bounces (net, straight into a wall and out), where it ends
+func _landing(side: String) -> Vector2:
+	var sim = ball.model.clone()
+	while not sim.is_done():
+		sim.step()
+		for e in sim.events:
+			if e.kind == "floor":
+				return to_court(side, e.x, e.y)
+	return to_court(side, sim.x, sim.y)
+
+
+func _last_hit(side: String) -> Dictionary:
+	for i in range(hits.size() - 1, -1, -1):
+		if hits[i].side == side:
+			return hits[i]
+	return {}
 
 
 ## the incoming ball, in its own model coordinates the receiver is the far half
@@ -194,10 +288,43 @@ func on_point_over(result: String) -> void:
 	last_winner = winner
 	last_result = result
 	last_by = hitter
+	_explain(winner, hitter)
 	var who := "You" if winner == "near" else "Opponent"
 	var by := "your" if hitter == "near" else "their"
 	last = "%s won the point (%s shot: %s, %d hits)" % [who, by, result, rally_len]
 	state = "over"
+
+
+## the cause of the point for the HUD and the log, and the overlay tallies
+func _explain(winner: String, hitter: String) -> void:
+	last_cause = ""
+	last_whiff = ""
+	var yours := _last_hit("near")
+	var theirs := _last_hit("far")
+	if winner == "near" and not yours.is_empty() and yours.kind != "serve":
+		tally[yours.kind].won += 1
+		if yours.net:
+			tally.net.won += 1
+	if hitter == "near" and winner == "near":
+		last_cause = "your %s%s" % [yours.get("kind", "shot"), " from the net" if yours.get("net", false) else ""]
+		var brain = brains.get("far")
+		if brain and brain.plan_id == shot_id:
+			if brain.whiff:
+				last_whiff = strain_name(brain.strain)
+				whiff_tally[last_whiff] += 1
+				last_cause += ", they whiffed (%s)" % last_whiff
+			elif not brain.reachable:
+				last_cause += ", out of their reach"
+	elif hitter == "far" and winner == "far":
+		if theirs.get("lob", false):
+			lobbed_at_net += 1
+			last_cause = "they lobbed you at the net"
+		else:
+			last_cause = "their %s" % theirs.get("kind", "shot")
+	elif hitter == "near":
+		last_cause = "your error"
+	else:
+		last_cause = "their error"
 
 
 ## the scene calls this after the pause between points

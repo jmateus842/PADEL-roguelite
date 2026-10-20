@@ -28,7 +28,7 @@ const PAUSE := 1.2
 const GAUGE_FLOOR := Vector2(835, 640)
 const GAUGE_PPM := 60.0
 
-const KEY_HINT := "WASD move    J swing    T slow    Tab stats    Esc menu"
+const KEY_HINT := "WASD move    J swing    T slow    Tab stats + overlay    Esc menu"
 const PAD_HINT := "Stick move    A swing    D-pad up slow    Start menu"
 
 # --- HUD look ---
@@ -36,6 +36,15 @@ const CARD_BG := Color(0.08, 0.09, 0.11, 0.88)
 const DIM := Color(1, 1, 1, 0.55)
 const YOU_COLOR := Color("#f2f2f2")
 const OPP_COLOR := Color("#f39c12")
+## how stretched the opponent is: rules.strain_name() to a color
+const STRAIN_COLORS := {
+	"easy": Color("#2ecc71"),
+	"working": Color("#f1c40f"),
+	"stretched": Color("#e74c3c"),
+}
+## pop-up labels and landing marks live this long, real seconds
+const POP_LIFE := 1.2
+const LOG_HEADER := "row,point,shot,side,came,kind,net,lob,contact_x,contact_y,height,land_x,land_y,pressure,strain,winner,result,by,cause"
 
 ## readable endings for the ball model's results
 const ENDINGS := {
@@ -79,6 +88,11 @@ var _stats_card: PanelContainer
 var _stats: Label
 var _hint: Label
 var _menu
+## overlay: floating labels and landing marks, each {text, at (court m), color, age}
+var _pops: Array[Dictionary] = []
+var _seen_shot := 0
+var _seen_points := 0
+var _log: FileAccess
 
 
 func _ready() -> void:
@@ -93,6 +107,7 @@ func _ready() -> void:
 	_menu.stats_toggled.connect(_set_stats)
 	add_child(_menu)
 	_menu.set_stats_label(stats_on)
+	_open_log()
 
 
 ## restart the match in the picked mode, fresh score
@@ -143,9 +158,57 @@ func _set_stats(on: bool) -> void:
 	_menu.set_stats_label(on)
 
 
-func _process(_delta: float) -> void:
+func _process(delta: float) -> void:
+	_watch_rules()
+	for p in _pops:
+		p.age += delta
+	_pops = _pops.filter(func(p): return p.age < POP_LIFE)
 	queue_redraw()
 	_update_info()
+
+
+## turn new hits and point endings into pop-ups and log rows
+func _watch_rules() -> void:
+	var r = rules
+	for h in r.hits:
+		if h.shot <= _seen_shot:
+			continue
+		_seen_shot = h.shot
+		if h.side == "near" and h.kind != "serve":
+			var text: String = h.kind.to_upper() + ("  NET" if h.net else "")
+			_pops.append({"text": text, "at": Vector2(h.x, h.y), "color": YOU_COLOR, "age": 0.0})
+			_pops.append({"text": "x", "at": Vector2(h.land_x, h.land_y), "color": YOU_COLOR, "age": 0.0, "mark": true})
+		elif h.side == "far" and h.lob:
+			_pops.append({"text": "LOB", "at": Vector2(h.x, h.y), "color": OPP_COLOR, "age": 0.0})
+	if r.points != _seen_points:
+		_seen_points = r.points
+		if r.last_whiff != "":
+			var at: Vector2 = opponent_body.pos()
+			_pops.append({"text": "WHIFF", "at": at, "color": STRAIN_COLORS[r.last_whiff], "age": 0.0})
+		_write_point()
+
+
+func _open_log() -> void:
+	var dir := "res://logs" if OS.has_feature("editor") else "user://logs"
+	DirAccess.make_dir_recursive_absolute(ProjectSettings.globalize_path(dir))
+	var stamp := Time.get_datetime_string_from_system().replace(":", "-")
+	var path := "%s/match_%s%s.csv" % [dir, stamp, "_watch" if stand_in else ""]
+	_log = FileAccess.open(path, FileAccess.WRITE)
+	if _log:
+		_log.store_line(LOG_HEADER)
+
+
+func _write_point() -> void:
+	if not _log:
+		return
+	var r = rules
+	var n: int = r.points
+	for h in r.hits:
+		_log.store_line("hit,%d,%d,%s,%s,%s,%s,%s,%.2f,%.2f,%.2f,%.2f,%.2f,%.2f,%.2f,,,," % [
+			n, h.shot, h.side, h.came, h.kind, h.net, h.lob,
+			h.x, h.y, h.z, h.land_x, h.land_y, h.pressure, h.strain])
+	_log.store_line("point,%d,,,,,,,,,,,,,,%s,\"%s\",%s,\"%s\"" % [n, r.last_winner, r.last_result, r.last_by, r.last_cause])
+	_log.flush()
 
 
 func _card(pos: Vector2, width: float) -> VBoxContainer:
@@ -225,6 +288,8 @@ func _update_info() -> void:
 		if r.last_result.begins_with("out: hit their"):
 			why = "hit the " + r.last_result.trim_prefix("out: hit their ")
 		_last.text = "Last point: %s shot, %s" % [whose, why]
+		if r.last_cause != "":
+			_last.text += "\n" + r.last_cause[0].to_upper() + r.last_cause.substr(1)
 	else:
 		_last.text = "First point"
 	_hint.text = PAD_HINT if Controls.using_gamepad else KEY_HINT
@@ -239,7 +304,13 @@ func _update_info() -> void:
 		for z in r.your_heights:
 			sum += z
 		t += "  average contact %.2f m\n" % (sum / r.your_heights.size())
-	t += "\nOpponent lobs %d   whiffs %d\n" % [r.opp_lobs, opponent.whiffs]
+	var k: Dictionary = r.tally
+	t += "\nYour shots   hit / won the point\n"
+	t += "  cross %d / %d   line %d / %d   mid %d / %d\n" % [k.cross.hit, k.cross.won, k.line.hit, k.line.won, k.mid.hit, k.mid.won]
+	t += "  from the net %d / %d\n" % [k.net.hit, k.net.won]
+	var w: Dictionary = r.whiff_tally
+	t += "\nOpponent whiffs\n  easy %d   working %d   stretched %d\n" % [w.easy, w.working, w.stretched]
+	t += "Opponent lobs %d   won the point %d\n" % [r.opp_lobs, r.lobbed_at_net]
 	var b: Vector3 = r.ball_court()
 	t += "\nBall height %.2f m%s\n" % [maxf(b.z, 0.0), "   IN REACH" if player.ball_in_reach else ""]
 	t += "Band %.1f to %.1f m   reach %.1f m" % [player.BAND_LOW, player.BAND_HIGH, player.REACH]
@@ -262,6 +333,44 @@ func _draw() -> void:
 	var z: float = clampf(rules.ball_court().z, 0.0, 4.0)
 	draw_circle(GAUGE_FLOOR - Vector2(0, z * GAUGE_PPM), 6.0, BallView.height_color(z))
 	draw_string(ThemeDB.fallback_font, top - Vector2(14, 10), "height", HORIZONTAL_ALIGNMENT_LEFT, -1, 12)
+	if stats_on:
+		_draw_overlay()
+
+
+## court meters to this node's pixels
+func _px(at: Vector2) -> Vector2:
+	return court.position + Court.to_screen(at.x, at.y)
+
+
+func _draw_overlay() -> void:
+	var font := ThemeDB.fallback_font
+	# net zone on your half: inside it, the opponent lobs you
+	var zy: float = BallModel.NET_Y - rules.NET_ZONE
+	var inside: bool = player.py >= zy
+	var a := _px(Vector2(0.0, BallModel.NET_Y))
+	var b := _px(Vector2(BallModel.W, zy))
+	draw_rect(Rect2(Vector2(a.x, a.y), Vector2(b.x - a.x, b.y - a.y)), Color(1.0, 0.6, 0.1, 0.16 if inside else 0.05))
+	var x := 0.0
+	while x < BallModel.W:
+		draw_line(_px(Vector2(x, zy)), _px(Vector2(minf(x + 0.4, BallModel.W), zy)), Color(1, 1, 1, 0.45), 1.5)
+		x += 0.8
+	draw_string(font, _px(Vector2(0.15, zy)) + Vector2(0, 14), "net zone: they lob", HORIZONTAL_ALIGNMENT_LEFT, -1, 11, Color(1, 1, 1, 0.5))
+	# ring under the opponent while it chases a ball it has read
+	if rules.state == "play" and rules.receiver() == "far" and opponent.plan_id == rules.shot_id:
+		var color: Color = STRAIN_COLORS[rules.strain_name(opponent.strain)]
+		draw_arc(_px(opponent_body.pos()), 0.55 * Court.PPM, 0.0, TAU, 32, color, 3.0)
+	# pop-ups fade and drift up, landing marks just fade
+	for p in _pops:
+		var fade: float = 1.0 - p.age / POP_LIFE
+		var c: Color = p.color
+		c.a = fade
+		var at := _px(p.at)
+		if p.get("mark", false):
+			var s := 6.0
+			draw_line(at - Vector2(s, s), at + Vector2(s, s), c, 2.0)
+			draw_line(at - Vector2(s, -s), at + Vector2(s, -s), c, 2.0)
+		else:
+			draw_string(font, at + Vector2(-24, -22 - 20.0 * p.age), p.text, HORIZONTAL_ALIGNMENT_LEFT, -1, 15, c)
 
 
 func _exit_tree() -> void:

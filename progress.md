@@ -4,7 +4,7 @@ Log of ongoing work and decisions, so a new session can pick up where the last o
 
 ## Project status (as of 2026-10-19)
 
-* **Current priority:** play 10 minutes against the retuned opponent (Session 13) and check whether crosscourt still feels free. Then the volley protocol from Session 8. Run `run_tests.bat` after every change to the ball, player, rally or opponent.
+* **Current priority:** play 10 minutes against the retuned opponent (Session 13) with the overlay on (Tab), then send the CSV from `logs/`. Check whether crosscourt still feels free. Then the volley protocol from Session 8. Run `run_tests.bat` after every change to the ball, player, rally or opponent.
 * **Playcentric step:** 5. Playtest 1, first pass done on the practice court. Match build ready for the real pass.
 * **Known blockers:** None.
 * **Active known issues:**
@@ -15,10 +15,58 @@ Log of ongoing work and decisions, so a new session can pick up where the last o
     * Playtest 1 in the match: crossing the ball beat the opponent too easily, and it whiffed easy balls. Cause was the miss roll, not positioning. Retuned in Session 13, needs a hand playtest (from Session 11).
     * Match rules are simplified: the serve changes sides every point, serves are auto-aimed into the box (no service faults), and the score is a plain point count (from Session 10).
 * **Technical debt:**
+    * A GDScript runtime error inside the suite prints SCRIPT ERROR but doesn't fail the run. Session 14 hit one that only showed in the log. Make the runner fail on it (from Session 14).
     * The `SHOTS` table lives in both `sim/wall_shots.py` and `scripts/shots.gd`. `tests/test_sim.py` now fails if they differ, so drift gets caught, but you still edit both (from Session 3).
     * `shot_planner.gd` (moved out of `rally.gd`, now shared by you, the opponent and the practice court) plans shots with its own light copy of the ball's flight (drag, gravity, net). Change the model's tuning and the planner drifts. The return and lob grid tests catch it (from Session 7, moved in Session 10).
     * The practice court and the match reuse the `lab_*` actions (Space, T, R, arrows). The match uses `lab_speed` for slow motion, so a second scene needs them now. Rename to shared names soon. `lab_replay` moved from Start to R3 when Start became the menu (from Session 7, Session 11).
     * `tests/golden_random.json` is tracked but rewritten on every test run. Runs on different machines change the last digit of some floats, so git shows it as modified. Harmless (the Godot check allows 1e-9 m), but decide whether to gitignore it (from Session 9).
+
+---
+
+## 2026-10-19 (Session 14) – Playtest overlay and a CSV log per match [UI] [Playtest]
+
+### Handoff
+
+* **Result:** Tab now shows the stats panel plus an overlay on the court: CROSS, LINE or MID over each of your shots (NET when you hit from the net zone), an X where it lands, a ring under the opponent colored by how stretched it is, WHIFF in that color when it misses, LOB when it lobs, and the net zone drawn on your half. Every match writes a CSV log.
+* **Why it matters:** the Session 13 retune needs a playtest that answers three things: does crosscourt still win too much, does it still whiff easy balls, do you win by attacking from the net. Now you can see each one as it happens, and the log gives numbers to compare with the bot measurements.
+* **Next recommended action:** play 10 minutes with the overlay on, then send the newest file from `logs/`.
+
+### Accomplished
+
+* `scripts/match_rules.gd`: every hit, serve included, goes into `hits` with its kind, net zone flag, lob flag, contact, landing spot (a clone of the ball stepped to its first bounce), and the hitting brain's pressure and strain. Kinds: cross when contact and first bounce sit on opposite sides of the center line, mid when it lands within 1 m of it, line for the rest. `NET_ZONE` is the opponent's `LOB_WHEN` (3.5 m).
+* Tallies: your shots by kind and the ones that won the point (your last shot of a point you won), net shots, the opponent's whiffs that gave you a point split by easy, working or stretched, and points it won with a lob.
+* `last_cause` explains each point in words: "your cross from the net, they whiffed (stretched)", "they lobbed you at the net", "your error".
+* `scripts/opponent.gd`: `strain` is now a member, so the overlay and the log can read it.
+* `scripts/match.gd`: overlay drawn on top of the court when the stats panel is on. Pop-ups fade over 1.2 s. Ring colors: green easy (strain 0), yellow working (under 0.5), red stretched. The scoreboard shows the cause under the last point. The stats card shows the new tallies. Overlay works in watch mode too.
+* CSV log: `logs/match_<date>_<time>.csv` in the project when run from the editor, `user://logs` otherwise, `_watch` in the name for watch mode. One `hit` row per shot, one `point` row per point with winner, result and cause. Flushed after every point. `logs/` is gitignored.
+* `tests/godot_tests.gd` suite 8: shot kind and strain name cases, plus 40 points of opponent vs. opponent checking every tag against its own data, tallies against the hits, whiff causes against whiffs, and a cause for every point.
+
+### Verified
+
+* Full suite on Godot 4.5.stable (Linux, cloud): all good (5,755 checks, 520 hits tagged).
+* Rendered the match in watch mode under Xvfb with the overlay on: CROSS and LINE labels, landing X, yellow ring under the opponent, net zone band and line, "Their line" under the last point, new stats lines. Fixed a stats line that wrapped.
+* Ran the match headless in both modes: no script errors. The watch-mode log reads correctly (serve landings diagonal, kinds match contact and landing).
+* Found and fixed a crash in the cause text when a point ends on a ball launched without a hit record (only the return-rate test does that).
+* Not tried by hand on Windows yet.
+
+### Deferred / Follow-up
+
+1. Playtest with the overlay and send the log.
+2. Volley protocol from Session 8.
+3. Make the test runner fail on SCRIPT ERROR (technical debt).
+
+### Files Touched
+
+* `scripts/match_rules.gd` — **Edit** — hit records, landing prediction, shot kinds, tallies, point causes
+* `scripts/match.gd` — **Edit** — overlay, cause line, stats lines, CSV log
+* `scripts/opponent.gd` — **Edit** — `strain` as a member
+* `tests/godot_tests.gd` — **Edit** — overlay data checks in suite 8
+* `.gitignore` — **Edit** — `logs/`
+* `progress.md` — **Edit** — this entry and status block
+
+### Status Update
+
+* Priority now includes the overlay and the log. Added the silent SCRIPT ERROR to technical debt.
 
 ---
 

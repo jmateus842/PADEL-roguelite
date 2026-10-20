@@ -16,7 +16,8 @@ extends SceneTree
 ## 8. match: the far body stays on its half, lobs clear a player at the net and
 ##    land in, the opponent lobs only when you're close to the net and drives
 ##    away from you, points go to the right side, serves land in the box, and
-##    opponent vs opponent plays long matches that always finish
+##    opponent vs opponent plays long matches that always finish. The playtest
+##    overlay data: shot kinds, net zone, landing spots, tallies and whiff causes
 ## Exit code 1 if anything fails.
 
 const BallModel := preload("res://scripts/ball_model.gd")
@@ -515,6 +516,8 @@ func _suite_match() -> void:
 	_match_points()
 	var rate := _match_return_rate()
 	var stats := _match_long_run()
+	var tagged := _match_overlay()
+	stats += ", %d hits tagged" % tagged
 	_summary("match: far half, lobs, shot choice, scoring, serves, opponent vs opponent", before,
 		"(%d lobs, opponent returns %d%% of your drives, %s)" % [lobs, roundi(rate * 100.0), stats])
 
@@ -695,6 +698,56 @@ func _match_return_rate() -> float:
 	_check(rate >= 0.6, "the opponent returns only %d%% of your drives" % roundi(rate * 100.0))
 	_check(rate < 1.0, "the opponent returns every drive, you can't win a point")
 	return rate
+
+
+## the data behind the overlay and the log, from 40 points of opponent vs opponent
+func _match_overlay() -> int:
+	# shot kinds from contact and landing x (court), center line at 5
+	_check(Rules.shot_kind(8.0, 1.5) == "cross" and Rules.shot_kind(2.0, 8.5) == "cross", "a diagonal shot isn't cross")
+	_check(Rules.shot_kind(8.0, 8.5) == "line" and Rules.shot_kind(2.0, 1.5) == "line", "a straight shot isn't line")
+	_check(Rules.shot_kind(8.0, 5.5) == "mid" and Rules.shot_kind(5.2, 1.5) == "line", "mid or a shot from the center is wrong")
+	_check(Rules.strain_name(0.0) == "easy" and Rules.strain_name(0.3) == "working" and Rules.strain_name(0.8) == "stretched", "strain names are wrong")
+	var n := _match_nodes()
+	var r = n[3]
+	var near = Opponent.new(r, "near", 3)
+	var far = Opponent.new(r, "far", 4)
+	var tagged := 0
+	var near_hits := 0
+	var near_net := 0
+	var near_won := 0
+	var causes := 0
+	while r.points < 40:
+		_match_play_point(n, [near, far], 7200)
+		for h in r.hits:
+			tagged += 1
+			if h.kind == "serve":
+				_check(h.came == "serve" and not h.net and not h.lob, "a serve was tagged as a rally shot")
+				continue
+			_check(h.kind == Rules.shot_kind(h.x, h.land_x), "shot %d tagged %s but lands as %s" % [h.shot, h.kind, Rules.shot_kind(h.x, h.land_x)])
+			var my_y: float = h.y if h.side == "near" else BallModel.L - h.y
+			_check(h.net == (my_y >= BallModel.NET_Y - Rules.NET_ZONE), "net zone tag wrong at y %.2f" % h.y)
+			_check(h.strain >= 0.0 and h.strain <= 1.0, "a brain's hit has no strain")
+			if h.side == "near":
+				near_hits += 1
+				if h.net:
+					near_net += 1
+		if r.last_cause != "":
+			causes += 1
+		r.next_point()
+	var k: Dictionary = r.tally
+	_check(k.cross.hit + k.line.hit + k.mid.hit == near_hits, "the tally counts %d of near's %d shots" % [k.cross.hit + k.line.hit + k.mid.hit, near_hits])
+	_check(k.net.hit == near_net, "the tally counts %d net shots, saw %d" % [k.net.hit, near_net])
+	for kind in k:
+		_check(k[kind].won <= k[kind].hit, "%s won more points than it was hit" % kind)
+	near_won = k.cross.won + k.line.won + k.mid.won
+	_check(near_won <= r.score.near, "won tallies (%d) beat near's score (%d)" % [near_won, r.score.near])
+	var w: Dictionary = r.whiff_tally
+	_check(w.easy + w.working + w.stretched <= far.whiffs, "more whiff causes than whiffs")
+	_check(w.easy + w.working + w.stretched > 0, "no point in 40 ended on a whiff")
+	_check(r.lobbed_at_net <= r.opp_lobs, "more lob points than lobs")
+	_check(causes == 40, "only %d of 40 points have a cause" % causes)
+	_match_free(n)
+	return tagged
 
 
 ## two opponents play each other: every point ends, everyone stays on their half,
