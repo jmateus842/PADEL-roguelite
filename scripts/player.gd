@@ -1,7 +1,8 @@
 extends Node2D
-## The player on the near half, top down. Position in court meters, like the ball.
-## Moves with Controls.move_vector() and swings with the "swing" action.
-## practice.gd feeds it input each tick, so tests can drive it directly.
+## A player body, top down. Position in court meters, like the ball.
+## You play it on the near half with Controls.move_vector() and "swing".
+## The opponent is the same body with far = true, driven by opponent.gd.
+## The scene feeds it input each tick, so tests can drive it directly.
 ##
 ## Hitting: while a swing is active, the ball counts as in reach when its true
 ## position (the shadow) is within REACH of the player and its height sits in
@@ -29,7 +30,13 @@ const NET_GAP := 0.4
 
 const BODY := 0.3   # drawn radius, m
 const COLOR := Color("#f2f2f2")
+const FAR_COLOR := Color("#f39c12")
 
+## false: near half (you). true: far half (the opponent)
+var far := false
+## starts at SPEED. The opponent runs a little slower, see opponent.gd
+var top_speed := SPEED
+var color := COLOR
 var px := 5.0
 var py := 2.5
 var vel := Vector2.ZERO
@@ -51,12 +58,17 @@ func reset(at := Vector2(5.0, 2.5)) -> void:
 
 ## stick or WASD as given by Controls.move_vector(): screen up is toward the net
 func tick(stick: Vector2, delta: float) -> void:
-	var want := Vector2(stick.x, -stick.y).limit_length(1.0) * SPEED
+	drive(Vector2(stick.x, -stick.y), delta)
+
+
+## dir in court axes (+y runs from the near back wall to the far one), length 0 to 1
+func drive(dir: Vector2, delta: float) -> void:
+	var want := dir.limit_length(1.0) * top_speed
 	vel = vel.move_toward(want, ACCEL * delta)
 	px += vel.x * delta
 	py += vel.y * delta
-	var lo := Vector2(WALL_GAP, WALL_GAP)
-	var hi := Vector2(BallModel.W - WALL_GAP, BallModel.NET_Y - NET_GAP)
+	var lo := bounds_lo()
+	var hi := bounds_hi()
 	if px < lo.x or px > hi.x:
 		vel.x = 0.0
 	if py < lo.y or py > hi.y:
@@ -71,6 +83,19 @@ func tick(stick: Vector2, delta: float) -> void:
 		cooldown_left -= delta
 	flash = maxf(flash - delta, 0.0)
 	queue_redraw()
+
+
+## corners of the area this body may stand in
+func bounds_lo() -> Vector2:
+	return Vector2(WALL_GAP, BallModel.NET_Y + NET_GAP if far else WALL_GAP)
+
+
+func bounds_hi() -> Vector2:
+	return Vector2(BallModel.W - WALL_GAP, BallModel.L - WALL_GAP if far else BallModel.NET_Y - NET_GAP)
+
+
+func pos() -> Vector2:
+	return Vector2(px, py)
 
 
 func start_swing() -> bool:
@@ -108,5 +133,5 @@ func _draw() -> void:
 	if flash > 0.0:
 		draw_circle(c, reach_px, Color(1.0, 0.9, 0.3, 0.35))
 	draw_arc(c, reach_px, 0.0, TAU, 40, ring, 1.5)
-	draw_circle(c, BODY * Court.PPM, COLOR)
+	draw_circle(c, BODY * Court.PPM, color)
 	draw_circle(c, BODY * Court.PPM * 0.45, Color("#c0392b"))

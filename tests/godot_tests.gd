@@ -13,6 +13,10 @@ extends SceneTree
 ## 7. rally: feeds play mirrored, the receiver only plays a ball on our side,
 ##    every return from the near half lands in, every feed can be returned
 ##    through real playback, and the tally counts each kind of point
+## 8. match: the far body stays on its half, lobs clear a player at the net and
+##    land in, the opponent lobs only when you're close to the net and drives
+##    away from you, points go to the right side, serves land in the box, and
+##    opponent vs opponent plays long matches that always finish
 ## Exit code 1 if anything fails.
 
 const BallModel := preload("res://scripts/ball_model.gd")
@@ -21,6 +25,9 @@ const Shots := preload("res://scripts/shots.gd")
 const Controls := preload("res://scripts/controls.gd")
 const PlayerNode := preload("res://scripts/player.gd")
 const Rally := preload("res://scripts/rally.gd")
+const Planner := preload("res://scripts/shot_planner.gd")
+const Rules := preload("res://scripts/match_rules.gd")
+const Opponent := preload("res://scripts/opponent.gd")
 const GOLDEN := "res://tests/golden_random.json"
 
 ## energy may creep up a little from the step size alone, never more than this (J/kg)
@@ -41,6 +48,7 @@ func _init() -> void:
 	_suite_controls()
 	_suite_player()
 	_suite_rally()
+	_suite_match()
 	print("\nGodot: %s" % ("all good (%d checks)" % passed if failed == 0 else "%d failed, %d passed" % [failed, passed]))
 	quit(1 if failed else 0)
 
@@ -351,10 +359,10 @@ func _suite_rally() -> void:
 	for xi in 10:
 		for yi in 10:
 			for z in [PlayerNode.BAND_LOW, 1.0, PlayerNode.BAND_HIGH]:
-				for aim_x in [5.0 - Rally.AIM_SPREAD, 5.0, 5.0 + Rally.AIM_SPREAD]:
+				for aim_x in [5.0 - Planner.AIM_SPREAD, 5.0, 5.0 + Planner.AIM_SPREAD]:
 					var c := [0.3 + xi * 1.04, 0.3 + yi * 1.03, z]
 					var m = BallModel.new()
-					m.reset(c, Rally.plan_return(c, aim_x), 1.0)
+					m.reset(c, Planner.plan(c, aim_x), 1.0)
 					m.run_to_end()
 					returns += 1
 					_check(m.end.begins_with("winner"), "return from %s aimed at x %.0f: %s (%s)" % [c, aim_x, m.end, m.describe()])
@@ -485,3 +493,246 @@ func _actions_for(e: InputEvent, actions: Array) -> Array:
 		if e.is_action_pressed(action):
 			hit.append(action)
 	return hit
+
+
+# --- 8 ---------------------------------------------------------------------
+
+func _suite_match() -> void:
+	var before := failed
+	_match_far_body()
+	var lobs := _match_lobs()
+	_match_shot_choice()
+	_match_points()
+	var rate := _match_return_rate()
+	var stats := _match_long_run()
+	_summary("match: far half, lobs, shot choice, scoring, serves, opponent vs opponent", before,
+		"(%d lobs, opponent returns %d%% of your drives, %s)" % [lobs, roundi(rate * 100.0), stats])
+
+
+## a match with no brains: the test drives everything
+func _match_nodes() -> Array:
+	var ball = BallNode.new()
+	var near = PlayerNode.new()
+	var far = PlayerNode.new()
+	return [ball, near, far, Rules.new(ball, near, far)]
+
+
+func _match_free(n: Array) -> void:
+	n[3].brains.clear()
+	n[0].free()
+	n[1].free()
+	n[2].free()
+
+
+## run the scene loop at 60 fps: brains, rules, ball. Stops when the point ends
+func _match_play_point(n: Array, brains: Array, max_ticks := 3600) -> void:
+	for i in max_ticks:
+		for b in brains:
+			b.tick(1.0 / 60.0)
+		for side in ["near", "far"]:
+			if not n[3].brains.has(side):
+				n[3].bodies[side].tick(Vector2.ZERO, 1.0 / 60.0)
+		n[3].tick(1.0 / 60.0)
+		n[0]._physics_process(1.0 / 60.0)
+		if n[3].state == "over":
+			return
+
+
+func _match_far_body() -> void:
+	var p = PlayerNode.new()
+	p.far = true
+	var lo := Vector2(PlayerNode.WALL_GAP, BallModel.NET_Y + PlayerNode.NET_GAP)
+	var hi := Vector2(BallModel.W - PlayerNode.WALL_GAP, BallModel.L - PlayerNode.WALL_GAP)
+	for dir in [Vector2.LEFT, Vector2.RIGHT, Vector2.UP, Vector2.DOWN, Vector2(1, 1), Vector2(-1, -1)]:
+		p.reset(Vector2(5.0, 15.0))
+		var inside := true
+		for i in 240:
+			p.drive(dir, 1.0 / 60.0)
+			inside = inside and p.px >= lo.x - 1e-9 and p.px <= hi.x + 1e-9 and p.py >= lo.y - 1e-9 and p.py <= hi.y + 1e-9
+		_check(inside, "far body left the far half driving %s: (%.2f, %.2f)" % [dir, p.px, p.py])
+	p.free()
+
+
+## lobs from anywhere on the hitter's half land in and pass over a player at the net
+func _match_lobs() -> int:
+	var count := 0
+	for xi in 6:
+		for yi in 6:
+			for z in [PlayerNode.BAND_LOW, PlayerNode.BAND_HIGH]:
+				for aim_x in [1.0, 5.0, 9.0]:
+					var c := [0.5 + xi * 1.8, 0.5 + yi * 1.6, z]
+					var m = BallModel.new()
+					m.reset(c, Planner.plan_lob(c, aim_x), 1.0)
+					var low_over_net_player := false
+					while not m.is_done():
+						m.step()
+						var near_net: bool = m.y > BallModel.NET_Y + PlayerNode.NET_GAP and m.y < BallModel.NET_Y + Opponent.LOB_WHEN
+						if near_net and m.z <= PlayerNode.BAND_HIGH and not m.events.any(func(e): return e.kind == "floor"):
+							low_over_net_player = true
+					count += 1
+					_check(m.end.begins_with("winner"), "lob from %s aimed at x %.0f: %s (%s)" % [c, aim_x, m.end, m.describe()])
+					_check(not low_over_net_player, "lob from %s aimed at x %.0f is reachable from the net" % [c, aim_x])
+	return count
+
+
+## first bounce of the ball in the air, court coordinates
+func _first_bounce(ball) -> Vector2:
+	var m = ball.model.clone()
+	m.events.clear()
+	while not m.is_done() and m.events.is_empty():
+		m.step()
+		m.events = m.events.filter(func(e): return e.kind == "floor")
+	if m.events.is_empty():
+		return Vector2(-1, -1)
+	return ball.world(m.events[0].x, m.events[0].y)
+
+
+func _match_shot_choice() -> void:
+	# you near the net: lob. you at the back: drive. Either way away from you
+	for case in [[Vector2(2.0, 8.5), true], [Vector2(8.0, 8.0), true], [Vector2(2.0, 2.0), false], [Vector2(8.0, 3.0), false]]:
+		var n := _match_nodes()
+		var opp = Opponent.new(n[3], "far", 3)
+		n[1].reset(case[0])
+		n[2].reset(Vector2(5.0, 16.0))
+		var contact := Rules.to_model("far", Vector3(5.0, 16.0, 1.0))
+		var vel: Array = opp.choose_shot(contact)
+		_check(opp.last_was_lob == case[1], "you at %s: lob %s, want %s" % [case[0], opp.last_was_lob, case[1]])
+		n[3]._launch("far", contact, vel)
+		var land := _first_bounce(n[0])
+		_check(land.y > 0.0 and land.y < BallModel.NET_Y, "shot from the far half should land on yours, landed %s" % land)
+		_check((land.x - 5.0) * (case[0].x - 5.0) < 0.0, "you at x %.0f, the shot landed at x %.1f: same side as you" % [case[0].x, land.x])
+		_match_free(n)
+
+
+func _match_points() -> void:
+	var n := _match_nodes()
+	var r = n[3]
+	var opp = Opponent.new(r, "far", 5)
+	# point 1: you serve, it returns, you don't move: its point
+	_check(r.state == "serve" and r.server == "near" and r.receiver() == "", "a match starts with your serve")
+	_check(r.serve() and r.state == "play" and r.last_hitter == "near" and r.receiver() == "far", "serve should put the ball in play for the far side")
+	var land := _first_bounce(n[0])
+	_check(land.y > BallModel.NET_Y and land.y < BallModel.NET_Y + BallModel.SERVICE_FROM_NET and land.x < 5.0, "your first serve (from the right) should land in their left box, landed %s" % land)
+	_check(not r.serve(), "a second serve during the point was accepted")
+	_match_play_point(n, [opp])
+	_check(r.state == "over" and r.score.far == 1 and r.score.near == 0 and r.rally_len == 2, "standing still after your serve should lose the point 0-1 after 2 hits, got %s, %d hits, %s" % [r.score, r.rally_len, r.last])
+	# point 2: it serves by itself from its right, diagonally into your box
+	r.next_point()
+	_check(r.server == "far" and r.state == "serve", "the serve should change sides")
+	var served := false
+	for i in 120:
+		opp.tick(1.0 / 60.0)
+		r.tick(1.0 / 60.0)
+		if r.state == "play":
+			served = true
+			break
+	_check(served and r.last_hitter == "far", "the opponent never served")
+	land = _first_bounce(n[0])
+	_check(land.y > BallModel.NET_Y - BallModel.SERVICE_FROM_NET and land.y < BallModel.NET_Y and land.x < 5.0, "its serve from its left (second point) should land in your left box, landed %s" % land)
+	_match_play_point(n, [opp])
+	_check(r.score.far == 2 and r.points == 2, "not returning the serve should lose the point, score %s" % r.score)
+	# an error goes to the other side: you hit it long into their back glass
+	r.next_point()
+	r.serve()
+	r._launch("near", [5.0, 5.0, 1.0], BallModel.launch([5.0, 5.0, 1.0], 30.0, 5.0, [5.0, 20.0]))
+	_match_play_point(n, [])
+	_check(r.score.far == 3 and r.last.contains("out"), "your ball out should be their point, got %s, %s" % [r.score, r.last])
+	# a winner goes to the hitter: it hits one you don't touch
+	r.next_point()
+	r._launch("far", [5.0, 3.0, 1.0], Planner.plan([5.0, 3.0, 1.0], 5.0))
+	_match_play_point(n, [])
+	_check(r.score.far == 4 and r.last.begins_with("Opponent won"), "their ball in should be their point, got %s, %s" % [r.score, r.last])
+	# you swing out of reach: nothing happens. In reach: it goes back
+	r.next_point()
+	r._launch("far", [5.0, 3.0, 1.0], Planner.plan([5.0, 3.0, 1.0], 5.0))
+	n[1].reset(Vector2(9.5, 0.5))
+	var hits := 0
+	for i in 600:
+		if not n[1].is_swinging():
+			n[1].start_swing()
+		n[1].tick(Vector2.ZERO, 1.0 / 60.0)
+		n[0]._physics_process(1.0 / 60.0)
+		if r.last_hitter == "near":
+			hits += 1
+			break
+		if r.state == "over":
+			break
+	_check(hits == 0, "a swing out of reach returned the ball")
+	_match_free(n)
+
+
+## you hit drives from all over your half to every aim, the opponent starts at home
+func _match_return_rate() -> float:
+	var tries := 0
+	var back := 0
+	for xi in 5:
+		for yi in 4:
+			for aim in [-1.0, 0.0, 1.0]:
+				var n := _match_nodes()
+				var r = n[3]
+				var opp = Opponent.new(r, "far", xi * 100 + yi * 10 + int(aim))
+				r.state = "play"
+				n[2].reset(opp.home())
+				var c := [1.0 + xi * 2.0, 1.0 + yi * 2.5, 1.0]
+				r._launch("near", c, Planner.plan(c, 5.0 + aim * Planner.AIM_SPREAD))
+				_match_play_point(n, [opp])
+				tries += 1
+				if r.rally_len >= 2:
+					back += 1
+					_check(r.last_hitter == "far", "the opponent hit the ball twice in a row")
+				_match_free(n)
+	var rate := float(back) / tries
+	_check(rate >= 0.6, "the opponent returns only %d%% of your drives" % roundi(rate * 100.0))
+	_check(rate < 1.0, "the opponent returns every drive, you can't win a point")
+	return rate
+
+
+## two opponents play each other: every point ends, everyone stays on their half,
+## rallies happen, the score adds up, and the same seeds play the same match
+func _match_long_run() -> String:
+	var a := _opp_vs_opp(150)
+	var b := _opp_vs_opp(150)
+	_check(a.score == b.score and a.lens == b.lens, "same seeds played two different matches: %s vs %s" % [a.score, b.score])
+	_check(a.score.near + a.score.far == 150, "150 points should be scored, got %s" % a.score)
+	_check(a.stuck == 0, "%d points never ended" % a.stuck)
+	_check(a.outside == 0, "a body left its half %d times" % a.outside)
+	var long := 0
+	for l in a.lens:
+		if l >= 3:
+			long += 1
+	_check(long >= 75, "only %d of 150 rallies had 3 or more hits" % long)
+	var sorted: Array = a.lens.duplicate()
+	sorted.sort()
+	return "150 points, median rally %d, longest %d" % [sorted[75], sorted[-1]]
+
+
+func _opp_vs_opp(points: int) -> Dictionary:
+	var n := _match_nodes()
+	var r = n[3]
+	var near = Opponent.new(r, "near", 7)
+	var far = Opponent.new(r, "far", 11)
+	var lens := []
+	var stuck := 0
+	var outside := 0
+	while r.points < points:
+		var ticks := 0
+		while r.state != "over" and ticks < 3600:
+			near.tick(1.0 / 60.0)
+			far.tick(1.0 / 60.0)
+			r.tick(1.0 / 60.0)
+			n[0]._physics_process(1.0 / 60.0)
+			ticks += 1
+			for body in [n[1], n[2]]:
+				var lo: Vector2 = body.bounds_lo()
+				var hi: Vector2 = body.bounds_hi()
+				if body.px < lo.x - 1e-9 or body.px > hi.x + 1e-9 or body.py < lo.y - 1e-9 or body.py > hi.y + 1e-9:
+					outside += 1
+		if r.state != "over":
+			stuck += 1
+			r.state = "over"
+			r.points += 1
+		lens.append(r.rally_len)
+		r.next_point()
+	var out := {"score": r.score.duplicate(), "lens": lens, "stuck": stuck, "outside": outside}
+	_match_free(n)
+	return out

@@ -95,6 +95,25 @@ func crossed() -> bool:
 	return _crossed
 
 
+## a copy of the ball as it is now, without its history (path and events).
+## The opponent steps it ahead to see where the ball will be
+func clone():
+	var c = get_script().new()
+	c.x = x
+	c.y = y
+	c.z = z
+	c.vx = vx
+	c.vy = vy
+	c.vz = vz
+	c.t = t
+	c.kick = kick
+	c.end = end
+	c._floor_near = _floor_near
+	c._floor_far = _floor_far
+	c._crossed = _crossed
+	return c
+
+
 func is_done() -> bool:
 	return end != ""
 

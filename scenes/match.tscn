@@ -1,0 +1,33 @@
+[gd_scene load_steps=5 format=3]
+
+[ext_resource type="Script" path="res://scripts/match.gd" id="1_match"]
+[ext_resource type="Script" path="res://scripts/court.gd" id="2_court"]
+[ext_resource type="Script" path="res://scripts/player.gd" id="3_player"]
+[ext_resource type="Script" path="res://scripts/ball.gd" id="4_ball"]
+
+[node name="Match" type="Node2D"]
+script = ExtResource("1_match")
+
+[node name="Court" type="Node2D" parent="."]
+show_behind_parent = true
+position = Vector2(60, 50)
+script = ExtResource("2_court")
+
+[node name="Player" type="Node2D" parent="Court"]
+script = ExtResource("3_player")
+
+[node name="Opponent" type="Node2D" parent="Court"]
+script = ExtResource("3_player")
+
+[node name="Ball" type="Node2D" parent="Court"]
+script = ExtResource("4_ball")
+
+[node name="Hud" type="CanvasLayer" parent="."]
+
+[node name="Info" type="Label" parent="Hud"]
+offset_left = 520.0
+offset_top = 50.0
+offset_right = 1260.0
+offset_bottom = 700.0
+theme_override_font_sizes/font_size = 16
+autowrap_mode = 3

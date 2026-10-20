@@ -4,19 +4,84 @@ Log of ongoing work and decisions, so a new session can pick up where the last o
 
 ## Project status (as of 2026-10-19)
 
-* **Current priority:** build a basic opponent on the far half. It also gives the volley vs. bounce choice its stakes. Run `run_tests.bat` after every change to the ball, player or rally.
-* **Playcentric step:** 5. Playtest 1, first pass done. Volley question parked (see Session 8).
+* **Current priority:** playtest 1 against the opponent (F5 opens the match now), then the volley protocol from Session 8. Run `run_tests.bat` after every change to the ball, player, rally or opponent. Run `run_tests.bat` after every change to the ball, player or rally.
+* **Playcentric step:** 5. Playtest 1, first pass done on the practice court. Match build ready for the real pass.
 * **Known blockers:** None.
 * **Active known issues:**
     * Padel origin and Balatro release date in the goals doc came from memory and still need checking (from Session 1).
     * Sim tuning (glass and mesh restitution, ball bounce) is guessed and unchecked against real footage (from Session 2).
     * The "ball died" rule never fired in 60,000 random launches. It may be dead code (from Session 4).
-    * **Parked: volley vs. bounce.** Most feeds give as much time to volley as to play off the glass, and the game doesn't reward one over the other yet. If players end up volleying everything, the walls never matter. Protocol and fixes in Session 8. Revisit when the opponent lands or if a playtester camps at the net (from Session 7).
+    * **Ready to test: volley vs. bounce.** The opponent now lobs when you stand within 3.5 m of the net, and the match HUD counts your volleys, bounce hits and glass hits. Run the Session 8 protocol in the match (from Session 7, opponent in Session 10).
+    * Match rules are simplified: the serve changes sides every point, serves are auto-aimed into the box (no service faults), and the score is a plain point count (from Session 10).
 * **Technical debt:**
     * The `SHOTS` table lives in both `sim/wall_shots.py` and `scripts/shots.gd`. `tests/test_sim.py` now fails if they differ, so drift gets caught, but you still edit both (from Session 3).
-    * `rally.gd` plans returns with its own light copy of the ball's flight (drag, gravity, net). Change the model's tuning and the planner drifts. The return grid test catches it (from Session 7).
-    * The practice court reuses the `lab_*` actions (Space, T, R, arrows). Rename them to shared names once a second scene needs them for real (from Session 7).
+    * `shot_planner.gd` (moved out of `rally.gd`, now shared by you, the opponent and the practice court) plans shots with its own light copy of the ball's flight (drag, gravity, net). Change the model's tuning and the planner drifts. The return and lob grid tests catch it (from Session 7, moved in Session 10).
+    * The practice court and the match reuse the `lab_*` actions (Space, T, R, arrows). The match uses `lab_speed` for slow motion, so a second scene needs them now. Rename to shared names soon (from Session 7).
     * `tests/golden_random.json` is tracked but rewritten on every test run. Runs on different machines change the last digit of some floats, so git shows it as modified. Harmless (the Godot check allows 1e-9 m), but decide whether to gitignore it (from Session 9).
+
+---
+
+## 2026-10-19 (Session 10) – Basic opponent on the far half, real points [Opponent] [Prototype]
+
+### Handoff
+
+* **Result:** a new main scene, `scenes/match.tscn`. You play points against a basic opponent on the far half: serve, rally, score.
+* **Why it matters:** this is the "plain padel vs. basic AI" build that playtest 1 called for. Standing at the net now costs something, because the opponent lobs you, so the parked volley question can finally get an answer.
+* **Next recommended action:** reload the project, run `run_tests.bat`, press F5 and play 10 minutes. Then run the Session 8 volley protocol, reading the hit counts from the HUD.
+
+### Accomplished
+
+* `scripts/opponent.gd`: a brain that drives a player body. It waits `REACTION` (0.25 s) after your shot, steps a copy of the ball ahead, and picks the first spot where the ball is in its band and it gets there without a scramble. If none exists, it picks the spot with the least pressure, which often means waiting for the bounce or the glass. It swings the moment the ball is in reach, then walks back home, 2.5 m from its back glass.
+* Misses: once per ball it rolls a whiff, 3% on an easy ball, up to 53% when it barely got there. Rushed shots also spray wider.
+* Shot choice: a drive (15 m/s) to the side you're not on, ±0.8 m error. A lob when you stand within 3.5 m of the net.
+* Knobs at the top of `opponent.gd`: `REACTION`, `RUN_SPEED` (5.0, you run 5.5), `DRIVE_SPEED`, `AIM_ERROR`, `LOB_WHEN`, `MISS_BASE`, `MISS_PRESSURE`, `COMFORT`.
+* `scripts/match_rules.gd`: serve, receiver rules, scoring. The ball model already judges from the hitter's side, so a result starting with "winner" goes to the hitter and anything else goes to the other side. Serves come from the right on even points and the left on odd ones, diagonally into the box (lands 5 m past the net).
+* `scripts/match.gd` + `scenes/match.tscn`: HUD with score, rally length, last point, your hits by type (volley, after the bounce, off the glass), average contact height, and opponent lobs and whiffs. You hold still until the serve, and swing serves when it's yours. `-- --demo` puts a second opponent on your side.
+* `scripts/shot_planner.gd`: the return planner moved out of `rally.gd`, plus a new `plan_lob()` (52°, lands 2 m from the back wall). The serve has `plan()` take depth and pace.
+* `scripts/player.gd`: `far` flag for the far half, `drive()` in court axes, `top_speed` and `color` vars. Your controls work the same.
+* `scripts/ball_model.gd`: `clone()` copies the ball's state for the opponent's look-ahead. `step()` is untouched, and the sim checks still match.
+* `project.godot`: main scene is the match. The practice court and the ball lab still open from the editor.
+
+#### Decisions
+* One body script for both sides, and the opponent works on either side. Tests and demo mode put one on yours.
+* The opponent plays the same ball model and planner as you, so it can't cheat on physics.
+* Server alternates every point for now, with no service faults and a plain point count. Real padel scoring waits until the rally feels right.
+
+### Verified
+
+* Full suite on Godot 4.5.stable (Linux, cloud): Python all good, Godot all good (4,243 checks, up from 3,728). New suite 8:
+    * The far body stays on its half.
+    * 216 lobs from a grid over the half land in and stay above 1.9 m wherever a net player stands.
+    * The opponent lobs only when you're close to the net and always aims away from you.
+    * Points go to the right side: a serve you don't return, your ball out, their ball in, your swing out of reach.
+    * Both serves land in the correct diagonal box.
+    * The opponent returns 77% of drives from a grid over your half to every aim. The test needs at least 60% and less than 100%.
+    * Opponent vs. opponent, 150 points: every point ends, nobody leaves their half, the same seeds play the same match. Median rally 4 hits, longest 25.
+* Planted six bugs one at a time and restored each: lob at 30° (33 failures), scoring swapped (5), aims at you (5), far body can cross the net (3), 1.5 s reaction (3), serve never changes side (2). Clean run passes after restoring.
+* Opened all three scenes headless with no errors. Rendered the match in demo mode under Xvfb: serve, rallies and scoring show, HUD hit counts update, opponent drawn in orange.
+* Not played by hand yet. Not run on Windows yet. Test run went from about 3 s to about 16 s, mostly the 150 point match.
+
+### Deferred / Follow-up
+
+1. Reload the project in the editor (files changed from outside), run `run_tests.bat`, press F5 and play.
+2. Volley protocol from Session 8, in the match.
+3. Tune from the playtest: opponent knobs in `opponent.gd`, `SERVE_SPEED` and `SERVE_DEPTH` in `match_rules.gd`.
+4. Later: real padel scoring, service faults, a lob for you.
+
+### Files Touched
+
+* `scripts/opponent.gd`, `scripts/match_rules.gd`, `scripts/match.gd`, `scripts/shot_planner.gd` (plus `.uid` files) — **New** — opponent brain, match rules, match scene script, shared shot planner
+* `scenes/match.tscn` — **New** — match scene
+* `scripts/player.gd` — **Edit** — far side, `drive()`, speed and color vars
+* `scripts/rally.gd` — **Edit** — planner moved to `shot_planner.gd`
+* `scripts/ball_model.gd` — **Edit** — `clone()`
+* `project.godot` — **Edit** — main scene is the match
+* `tests/godot_tests.gd` — **Edit** — suite 8, suite 7 uses the planner
+* `progress.md` — **Edit** — this entry and status block
+
+### Status Update
+
+* Priority moved to playtest 1 in the match. The volley known issue is now ready to test. Added the simplified match rules as a known issue. Updated the planner and `lab_*` items in technical debt.
 
 ---
 
