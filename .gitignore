@@ -1,0 +1,4 @@
+.godot/
+*.tmp
+tests/last_run.txt
+__pycache__/
