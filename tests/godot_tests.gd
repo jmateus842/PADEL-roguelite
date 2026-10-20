@@ -726,7 +726,7 @@ func _opp_vs_opp(points: int) -> Dictionary:
 	var outside := 0
 	while r.points < points:
 		var ticks := 0
-		while r.state != "over" and ticks < 3600:
+		while r.state != "over" and ticks < 7200:   # 120 s, long rallies are fine
 			near.tick(1.0 / 60.0)
 			far.tick(1.0 / 60.0)
 			r.tick(1.0 / 60.0)

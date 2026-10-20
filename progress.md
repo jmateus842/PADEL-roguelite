@@ -4,7 +4,7 @@ Log of ongoing work and decisions, so a new session can pick up where the last o
 
 ## Project status (as of 2026-10-19)
 
-* **Current priority:** make the opponent harder to beat with a plain crosscourt drive (Session 11 playtest), then the volley protocol from Session 8. Run `run_tests.bat` after every change to the ball, player, rally or opponent.
+* **Current priority:** play 10 minutes against the retuned opponent (Session 13) and check whether crosscourt still feels free. Then the volley protocol from Session 8. Run `run_tests.bat` after every change to the ball, player, rally or opponent.
 * **Playcentric step:** 5. Playtest 1, first pass done on the practice court. Match build ready for the real pass.
 * **Known blockers:** None.
 * **Active known issues:**
@@ -12,13 +12,61 @@ Log of ongoing work and decisions, so a new session can pick up where the last o
     * Sim tuning (glass and mesh restitution, ball bounce) is guessed and unchecked against real footage (from Session 2).
     * The "ball died" rule never fired in 60,000 random launches. It may be dead code (from Session 4).
     * **Ready to test: volley vs. bounce.** The opponent now lobs when you stand within 3.5 m of the net, and the match HUD counts your volleys, bounce hits and glass hits. Run the Session 8 protocol in the match (from Session 7, opponent in Session 10).
-    * Playtest 1 in the match: crossing the ball beats the opponent too easily. It also whiffs a few easy balls, rarely (from Session 11).
+    * Playtest 1 in the match: crossing the ball beat the opponent too easily, and it whiffed easy balls. Cause was the miss roll, not positioning. Retuned in Session 13, needs a hand playtest (from Session 11).
     * Match rules are simplified: the serve changes sides every point, serves are auto-aimed into the box (no service faults), and the score is a plain point count (from Session 10).
 * **Technical debt:**
     * The `SHOTS` table lives in both `sim/wall_shots.py` and `scripts/shots.gd`. `tests/test_sim.py` now fails if they differ, so drift gets caught, but you still edit both (from Session 3).
     * `shot_planner.gd` (moved out of `rally.gd`, now shared by you, the opponent and the practice court) plans shots with its own light copy of the ball's flight (drag, gravity, net). Change the model's tuning and the planner drifts. The return and lob grid tests catch it (from Session 7, moved in Session 10).
     * The practice court and the match reuse the `lab_*` actions (Space, T, R, arrows). The match uses `lab_speed` for slow motion, so a second scene needs them now. Rename to shared names soon. `lab_replay` moved from Start to R3 when Start became the menu (from Session 7, Session 11).
     * `tests/golden_random.json` is tracked but rewritten on every test run. Runs on different machines change the last digit of some floats, so git shows it as modified. Harmless (the Godot check allows 1e-9 m), but decide whether to gitignore it (from Session 9).
+
+---
+
+## 2026-10-19 (Session 13) – Opponent stops whiffing routine balls [Opponent] [Tuning]
+
+### Handoff
+
+* **Result:** the opponent's miss chance now counts only the pressure above 0.4. Routine balls miss about 8% instead of about 21%. Real scrambles still miss about half the time.
+* **Why it matters:** the Session 11 finding ("crossing is too easy, it fails easy balls") came from the miss roll, not from where it stands. Points should be won by pressure, mainly from the net, not by a dice roll on every drive.
+* **Next recommended action:** play 10 minutes by hand and check whether crosscourt still feels like a free point. Then the volley protocol from Session 8.
+
+### Accomplished
+
+* Measured before tuning, with a scripted "you" (the opponent brain with a fixed aim, always a 16 m/s drive) and a grid of contact spots and aims:
+    * The opponent reached every ball. Every lost point was a rolled whiff.
+    * Crosscourt was not its weak spot: it returned 79% of crosscourts and 69% down the line in rallies.
+    * Pressure sits near 0.6 even on routine balls, so `MISS_BASE + 0.5 × pressure²` gave about a 21% whiff on any drive.
+    * Lowering `COMFORT`, a shorter `REACTION`, a faster `RUN_SPEED` or another `HOME_DEPTH` barely moved the numbers. Shifting home toward your side wouldn't help either, since your aims (x = 1 and 9) are symmetric around the center.
+* `scripts/opponent.gd`: new `STRAIN_FROM` (0.4). Strain = pressure above it, scaled to 0 to 1. Whiff chance = `MISS_BASE + MISS_PRESSURE × strain²`. `MISS_PRESSURE` stays 0.5.
+* After the change, from the grid: your crosscourt from the back comes back 92%. A down-the-line drive hit from near the net still wins 58 to 67% of the time.
+* `tests/godot_tests.gd`: opponent vs. opponent per-point cap raised from 60 s to 120 s. Bot rallies are now longer (median 9 hits, up from 4), and a few passed 60 s without anything being stuck.
+
+#### Decisions
+* Miss chance is driven by strain above a threshold, not by raw pressure. Replaces the Session 10 miss formula.
+* The 120 s cap in the long-run test is about catching a frozen point, not limiting rally length.
+
+### Verified
+
+* Full suite on Godot 4.5.stable (Linux, cloud): all good. Match line: opponent returns 85% of your drives (was 77%), 150 points, median rally 9, longest 66.
+* Tried other settings first: threshold 0.6 with `MISS_PRESSURE` 0.35 made bots rally forever (median 21, 35 points stuck at the 60 s cap). Thresholds 0.5 and 0.6 left 10 to 13 points over 60 s.
+* Not played by hand yet.
+* Suite run is slower, about 39 s in the cloud, mostly the longer bot rallies.
+
+### Deferred / Follow-up
+
+1. Hand playtest against the retuned opponent.
+2. Volley protocol from Session 8.
+3. If it now feels too hard, `STRAIN_FROM` and `MISS_PRESSURE` are the two knobs.
+
+### Files Touched
+
+* `scripts/opponent.gd` — **Edit** — strain-based miss chance, `STRAIN_FROM`
+* `tests/godot_tests.gd` — **Edit** — 120 s per-point cap in opponent vs. opponent
+* `progress.md` — **Edit** — this entry and status block
+
+### Status Update
+
+* Priority moved to the hand playtest of the retuned opponent. Updated the Session 11 known issue with the cause.
 
 ---
 

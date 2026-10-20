@@ -34,9 +34,12 @@ const LOB_WHEN := 3.5
 ## how far off the center line it aims its drives, m
 const AIM_WIDE := 3.0
 ## chance it whiffs a ball: MISS_BASE on an easy ball, plus MISS_PRESSURE
-## times pressure². Pressure is run time over the time it had, 0 to 1
+## times strain². Pressure is run time over the time it had, 0 to 1. Strain
+## counts only the pressure above STRAIN_FROM, scaled back to 0 to 1, because
+## pressure sits near 0.6 even on routine balls (Session 13)
 const MISS_BASE := 0.03
 const MISS_PRESSURE := 0.5
+const STRAIN_FROM := 0.4
 
 # --- positioning ---
 ## where it waits between shots, meters from its own back wall
@@ -90,7 +93,8 @@ func tick(delta: float) -> void:
 				target = body.pos()   # hasn't read the shot yet
 			else:
 				make_plan()
-				whiff = rng.randf() < MISS_BASE + MISS_PRESSURE * pressure * pressure
+				var strain := clampf((pressure - STRAIN_FROM) / (1.0 - STRAIN_FROM), 0.0, 1.0)
+				whiff = rng.randf() < MISS_BASE + MISS_PRESSURE * strain * strain
 				if whiff:
 					whiffs += 1
 		if plan_id == rules.shot_id:
