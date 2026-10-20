@@ -263,6 +263,16 @@ func _suite_controls() -> void:
 			e.device = 2
 			_check(_actions_for(e, all_actions) == [action], "button %d should trigger only %s, triggers %s" % [b, action, _actions_for(e, all_actions)])
 	_check(JOY_BUTTON_A in Controls.ACTIONS.swing.buttons, "swing should be on the A button")
+	_check(JOY_BUTTON_START in Controls.ACTIONS.menu.buttons and KEY_ESCAPE in Controls.ACTIONS.menu.keys, "menu should be on Start and Esc")
+	# menus pick with A and go back with B on any pad, added once even after two registers
+	for pair in [["ui_accept", JOY_BUTTON_A], ["ui_cancel", JOY_BUTTON_B]]:
+		var e := InputEventJoypadButton.new()
+		e.button_index = pair[1]
+		e.pressed = true
+		e.device = 2
+		_check(e.is_action_pressed(pair[0]), "button %d should press %s" % [pair[1], pair[0]])
+		var same := InputMap.action_get_events(pair[0]).filter(func(x): return x is InputEventJoypadButton and x.button_index == pair[1])
+		_check(same.size() == 1, "%s has button %d %d times" % [pair[0], pair[1], same.size()])
 	# WASD drives movement
 	for case in [[KEY_A, "move_left"], [KEY_D, "move_right"], [KEY_W, "move_up"], [KEY_S, "move_down"]]:
 		_check(case[1] in _key_actions(case[0]), "%s should be bound to %s" % [OS.get_keycode_string(case[0]), case[1]])

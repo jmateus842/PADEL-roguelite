@@ -7,16 +7,18 @@ extends Node2D
 ## swing / serve       J            A (cross)
 ## aim your shot       hold A/D     stick left/right while you swing
 ## slow motion         T            D-pad up      1x, 0.5x, 0.25x
+## menu                Esc          Start         pick vs the opponent or watch
 ## Bindings live in scripts/controls.gd. Rules live in match_rules.gd,
 ## the opponent and its difficulty knobs in opponent.gd.
 ##
-## Optional: godot --path . -- --demo   (an opponent plays your side too)
+## Optional: godot --path . -- --demo   starts in opponent vs opponent
 
 const BallModel := preload("res://scripts/ball_model.gd")
 const Court := preload("res://scripts/court.gd")
 const Rules := preload("res://scripts/match_rules.gd")
 const Opponent := preload("res://scripts/opponent.gd")
 const BallView := preload("res://scripts/ball.gd")
+const Menu := preload("res://scripts/match_menu.gd")
 
 const SPEEDS := [1.0, 0.5, 0.25]
 ## pause after a point, game seconds
@@ -25,8 +27,12 @@ const PAUSE := 1.2
 const GAUGE_FLOOR := Vector2(400, 650)
 const GAUGE_PPM := 60.0
 
-const KEY_HINT := "WASD move   J swing / serve (hold A/D to aim)   T slow"
-const PAD_HINT := "Stick move   A swing / serve (stick aims)   D-pad up slow"
+const KEY_HINT := "WASD move   J swing / serve (hold A/D to aim)   T slow   Esc menu"
+const PAD_HINT := "Stick move   A swing / serve (stick aims)   D-pad up slow   Start menu"
+
+## true: an opponent plays your side too. Static so it survives the restart
+## when you pick a mode in the menu
+static var demo_mode := "--demo" in OS.get_cmdline_user_args()
 
 @onready var court: Node2D = $Court
 @onready var ball := $Court/Ball
@@ -46,8 +52,17 @@ func _ready() -> void:
 	opponent_body.color = opponent_body.FAR_COLOR
 	rules = Rules.new(ball, player, opponent_body)
 	opponent = Opponent.new(rules, "far")
-	if "--demo" in OS.get_cmdline_user_args():
+	if demo_mode:
 		stand_in = Opponent.new(rules, "near", 7)
+	var menu := Menu.new()
+	menu.mode_picked.connect(_on_mode_picked)
+	add_child(menu)
+
+
+## restart the match in the picked mode, fresh score
+func _on_mode_picked(demo: bool) -> void:
+	demo_mode = demo
+	get_tree().reload_current_scene()
 
 
 func _physics_process(delta: float) -> void:
@@ -91,7 +106,7 @@ func _process(_delta: float) -> void:
 
 func _update_info() -> void:
 	var r = rules
-	var t := "MATCH: you (near) vs the opponent (far)%s\n" % ("   DEMO" if stand_in else "")
+	var t := ("WATCH: opponent vs opponent\n" if stand_in else "MATCH: you (near) vs the opponent (far)\n")
 	t += "Score  you %d - %d opponent      speed %sx\n" % [r.score.near, r.score.far, SPEEDS[speed_i]]
 	if r.state == "serve":
 		t += "Your serve: press swing\n" if r.server == "near" and not stand_in else "Opponent serves\n"

@@ -20,7 +20,7 @@ const ACTIONS := {
 	# ball lab
 	"lab_next": {"keys": [KEY_RIGHT], "buttons": [JOY_BUTTON_DPAD_RIGHT, JOY_BUTTON_RIGHT_SHOULDER]},
 	"lab_prev": {"keys": [KEY_LEFT], "buttons": [JOY_BUTTON_DPAD_LEFT, JOY_BUTTON_LEFT_SHOULDER]},
-	"lab_replay": {"keys": [KEY_SPACE], "buttons": [JOY_BUTTON_START]},
+	"lab_replay": {"keys": [KEY_SPACE], "buttons": [JOY_BUTTON_RIGHT_STICK]},
 	"lab_speed": {"keys": [KEY_T], "buttons": [JOY_BUTTON_DPAD_UP]},
 	"lab_auto": {"keys": [KEY_R], "buttons": [JOY_BUTTON_DPAD_DOWN]},
 	"lab_check": {"keys": [KEY_C], "buttons": [JOY_BUTTON_BACK]},
@@ -31,6 +31,9 @@ const ACTIONS := {
 	"move_down": {"keys": [KEY_S], "axis": [JOY_AXIS_LEFT_Y, 1.0]},
 	# player shots. A (cross on PlayStation) or J
 	"swing": {"keys": [KEY_J], "buttons": [JOY_BUTTON_A]},
+	# opens and closes the match menu. Inside the menu, Godot's built-in ui_*
+	# actions move and pick (arrows or D-pad or stick, Enter or A, Esc or B)
+	"menu": {"keys": [KEY_ESCAPE], "buttons": [JOY_BUTTON_START]},
 }
 
 ## true once the last thing you touched was a gamepad. The HUD uses it
@@ -59,6 +62,16 @@ static func register() -> void:
 			e.axis_value = a.axis[1]
 			e.device = -1
 			InputMap.action_add_event(action, e)
+
+
+	# Godot's built-in menu actions have no gamepad pick/back by default.
+	# Add A to pick and B to go back, once, so menus work on a controller
+	for pair in [["ui_accept", JOY_BUTTON_A], ["ui_cancel", JOY_BUTTON_B]]:
+		var e := InputEventJoypadButton.new()
+		e.button_index = pair[1]
+		e.device = -1
+		if InputMap.has_action(pair[0]) and not InputMap.action_has_event(pair[0], e):
+			InputMap.action_add_event(pair[0], e)
 
 
 ## WASD or left stick as a vector, deadzone applied, length 0 to 1

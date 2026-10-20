@@ -6,7 +6,7 @@ extends Node2D
 ## move                WASD         left stick
 ## swing               J            A (cross)
 ## aim the return      hold A/D     stick left/right while you swing
-## next feed now       Space        Start
+## next feed now       Space        R3 (click the right stick)
 ## pick one feed       Left/Right   D-pad left/right or LB/RB   (repeats it)
 ## mix all feeds       R            D-pad down
 ## slow motion         T            D-pad up      1x, 0.5x, 0.25x
@@ -26,7 +26,7 @@ const GAUGE_FLOOR := Vector2(400, 650)
 const GAUGE_PPM := 60.0
 
 const KEY_HINT := "WASD move   J swing (hold A/D to aim)   Space next feed   Left/Right pick feed   R mix   T slow"
-const PAD_HINT := "Stick move   A swing (stick aims)   Start next feed   D-pad/LB/RB pick feed   D-pad down mix   D-pad up slow"
+const PAD_HINT := "Stick move   A swing (stick aims)   R3 next feed   D-pad/LB/RB pick feed   D-pad down mix   D-pad up slow"
 
 @onready var court: Node2D = $Court
 @onready var ball := $Court/Ball

@@ -5,7 +5,7 @@ extends Node2D
 ##                 keyboard     gamepad
 ## previous / next  Left/Right   D-pad left/right or LB/RB
 ## jump to a shot   1-9          (keyboard only)
-## replay           Space        Start
+## replay           Space        R3 (click the right stick)
 ## speed            T            D-pad up      1x, 0.25x, 0.1x
 ## auto replay      R            D-pad down
 ## check all        C            Back          compare every shot with sim/shots/summary.md
@@ -21,7 +21,7 @@ const SV_PX_Y := 38.0
 const SV_PX_Z := 40.0
 const SPEEDS := [1.0, 0.25, 0.1]
 const KEY_HINT := "Left/Right shot   1-9 jump   Space replay   T speed   R auto   C check all"
-const PAD_HINT := "D-pad or LB/RB shot   Start replay   D-pad up speed   D-pad down auto   Back check all"
+const PAD_HINT := "D-pad or LB/RB shot   R3 replay   D-pad up speed   D-pad down auto   Back check all"
 
 @onready var ball := $Court/Ball
 @onready var info: Label = $Hud/Info

@@ -4,7 +4,7 @@ Log of ongoing work and decisions, so a new session can pick up where the last o
 
 ## Project status (as of 2026-10-19)
 
-* **Current priority:** playtest 1 against the opponent (F5 opens the match now), then the volley protocol from Session 8. Run `run_tests.bat` after every change to the ball, player, rally or opponent. Run `run_tests.bat` after every change to the ball, player or rally.
+* **Current priority:** make the opponent harder to beat with a plain crosscourt drive (Session 11 playtest), then the volley protocol from Session 8. Run `run_tests.bat` after every change to the ball, player, rally or opponent. Run `run_tests.bat` after every change to the ball, player or rally.
 * **Playcentric step:** 5. Playtest 1, first pass done on the practice court. Match build ready for the real pass.
 * **Known blockers:** None.
 * **Active known issues:**
@@ -12,12 +12,57 @@ Log of ongoing work and decisions, so a new session can pick up where the last o
     * Sim tuning (glass and mesh restitution, ball bounce) is guessed and unchecked against real footage (from Session 2).
     * The "ball died" rule never fired in 60,000 random launches. It may be dead code (from Session 4).
     * **Ready to test: volley vs. bounce.** The opponent now lobs when you stand within 3.5 m of the net, and the match HUD counts your volleys, bounce hits and glass hits. Run the Session 8 protocol in the match (from Session 7, opponent in Session 10).
+    * Playtest 1 in the match: crossing the ball beats the opponent too easily. It also whiffs a few easy balls, rarely (from Session 11).
     * Match rules are simplified: the serve changes sides every point, serves are auto-aimed into the box (no service faults), and the score is a plain point count (from Session 10).
 * **Technical debt:**
     * The `SHOTS` table lives in both `sim/wall_shots.py` and `scripts/shots.gd`. `tests/test_sim.py` now fails if they differ, so drift gets caught, but you still edit both (from Session 3).
     * `shot_planner.gd` (moved out of `rally.gd`, now shared by you, the opponent and the practice court) plans shots with its own light copy of the ball's flight (drag, gravity, net). Change the model's tuning and the planner drifts. The return and lob grid tests catch it (from Session 7, moved in Session 10).
-    * The practice court and the match reuse the `lab_*` actions (Space, T, R, arrows). The match uses `lab_speed` for slow motion, so a second scene needs them now. Rename to shared names soon (from Session 7).
+    * The practice court and the match reuse the `lab_*` actions (Space, T, R, arrows). The match uses `lab_speed` for slow motion, so a second scene needs them now. Rename to shared names soon. `lab_replay` moved from Start to R3 when Start became the menu (from Session 7, Session 11).
     * `tests/golden_random.json` is tracked but rewritten on every test run. Runs on different machines change the last digit of some floats, so git shows it as modified. Harmless (the Godot check allows 1e-9 m), but decide whether to gitignore it (from Session 9).
+
+---
+
+## 2026-10-19 (Session 11) – Match menu on Start, first match playtest [Playtest] [UI]
+
+### Handoff
+
+* **Result:** Start (or Esc) opens a menu in the match: Resume, Play vs the opponent, Watch opponent vs opponent. Picking a mode restarts the match with a fresh score.
+* **Why it matters:** you can watch the opponent play itself without command line flags, which helps when tuning its knobs.
+* **Next recommended action:** make the crosscourt drive less of a sure point. Candidates: the opponent recovers toward the side you hit from instead of the center, or a shorter `REACTION`.
+
+### Accomplished
+
+* Playtest by JD: the opponent is OK. Crossing the ball is too easy a way to win the point. It fails on some really easy balls, but rarely.
+* `scripts/match_menu.gd`: menu built in code, pauses the match while open. D-pad, stick or arrows move, A or Enter picks, Start, Esc or B close.
+* `scripts/match.gd`: `demo_mode` is a static var, so the picked mode survives the scene reload. `--demo` still starts in watch mode. HUD title shows MATCH or WATCH, and the hints show the menu button.
+* `scripts/controls.gd`: new `menu` action on Esc and Start. `lab_replay` moved from Start to R3 (right stick click) in the ball lab and the practice court. Godot's built-in `ui_accept` and `ui_cancel` get A and B, since they have no gamepad bindings by default.
+* `tests/godot_tests.gd` suite 5: menu on Start and Esc, A picks and B goes back on any pad, added once even after two registers.
+
+### Verified
+
+* Full suite on Godot 4.5.stable (Linux, cloud): all good (4,252 checks).
+* Drove the real game under Xvfb with fake gamepad presses: Start pauses, D-pad down twice and A starts watch mode, B closes the menu, Start, down and A go back to playing. Recorded a 14 s clip of the same flow.
+* First try failed: A didn't press menu buttons, because Godot's `ui_accept` has no gamepad binding. Fixed in `controls.gd`.
+* Not tried by hand on Windows yet.
+
+### Deferred / Follow-up
+
+1. Tune the opponent against crosscourt drives.
+2. Volley protocol from Session 8.
+3. In watch mode the HUD still shows "Your hits" and your control hints. Fine for now.
+
+### Files Touched
+
+* `scripts/match_menu.gd` (plus `.uid`) — **New** — the menu
+* `scripts/match.gd` — **Edit** — menu, mode restart, HUD title and hints
+* `scripts/controls.gd` — **Edit** — `menu` action, `lab_replay` to R3, A and B for the ui actions
+* `scripts/ball_lab.gd`, `scripts/practice.gd` — **Edit** — hints say R3
+* `tests/godot_tests.gd` — **Edit** — menu and ui checks
+* `progress.md` — **Edit** — this entry and status block
+
+### Status Update
+
+* Priority moved to tuning the opponent against crosscourt drives. Added the playtest finding as a known issue. Noted the `lab_replay` move in technical debt.
 
 ---
 
