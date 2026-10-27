@@ -13,7 +13,7 @@ Log of ongoing work and decisions, so a new session can pick up where the last o
     * The "ball died" rule never fired in 60,000 random launches. It may be dead code (from Session 4).
     * **Ready to test: volley vs. bounce.** The opponent now lobs when you stand within 3.5 m of the net, and the match HUD counts your volleys, bounce hits and glass hits. Run the Session 8 protocol in the match (from Session 7, opponent in Session 10).
     * Playtest 1 (Session 15): you volley 68 of 110 shots and play 4 off the glass, the opponent never lobs you (your volleys sit 4.4 m from the net, outside its 3.5 m trigger), and nobody ever misses a shot. Every swing makes a perfect shot. See `design/glass-panels.md`.
-    * Playtest 2 (Session 16), only 5 points: with `LOB_WHEN` at 6 m the opponent lobbed 3 times and 5 of your 22 shots came off the glass (23%, was 4%). Lobs won no point. Too small to settle anything. Change not committed yet.
+    * Playtest 2 (Session 16), only 5 points: with `LOB_WHEN` at 6 m the opponent lobbed 3 times and 5 of your 22 shots came off the glass (23%, was 4%). Lobs won no point. Too small to settle anything. Committed (1e26de5) but still on trial: revert `LOB_WHEN` to 3.5 or try a value in between if the net feels locked.
     * **Ready to test: last-bounce ring and slow-mo (Session 17).** A ring on the court shows where the ball lands on its last bounce. Hold L2 (Shift on keyboard) to slow the world to 0.4x while you move at 0.6x. Numbers in `scripts/focus.gd` are guesses (3 s of slow-mo, 10 s refill). Not played by hand yet, and the L2 binding was only checked with fake events, not a real trigger.
     * Match rules are simplified: the serve changes sides every point, serves are auto-aimed into the box (no service faults), and the score is a plain point count (from Session 10).
 * **Technical debt:**
@@ -74,9 +74,14 @@ Log of ongoing work and decisions, so a new session can pick up where the last o
 * `tests/godot_tests.gd` — **Edit** — trigger, swing clock, focus suite, ring check
 * `progress.md` — **Edit** — this entry and status block
 
+### Commits
+
+* `1e26de5` — the 6 m lob trigger (Session 16) and `design/padel-wall-situations.md`, committed on JD's go-ahead while still on trial.
+* `cf3481c` — the ring, slow-mo, tests and this file. `desktop.ini` left untracked on purpose. Nothing pushed.
+
 ### Status Update
 
-* Priority now includes playtesting the ring and slow-mo. Added the Session 17 known issue.
+* Priority now includes playtesting the ring and slow-mo. Added the Session 17 known issue. The Session 16 lob change is committed but still on trial.
 
 ---
 
