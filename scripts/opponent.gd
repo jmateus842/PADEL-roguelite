@@ -30,7 +30,7 @@ const DRIVE_SPEED := 15.0
 ## random error on where it aims, meters left or right
 const AIM_ERROR := 0.8
 ## lob when you stand within this many meters of the net
-const LOB_WHEN := 3.5
+const LOB_WHEN := 6.0
 ## how far off the center line it aims its drives, m
 const AIM_WIDE := 3.0
 ## chance it whiffs a ball: MISS_BASE on an easy ball, plus MISS_PRESSURE
