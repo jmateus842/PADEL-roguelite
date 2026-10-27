@@ -29,6 +29,7 @@ const Rally := preload("res://scripts/rally.gd")
 const Planner := preload("res://scripts/shot_planner.gd")
 const Rules := preload("res://scripts/match_rules.gd")
 const Opponent := preload("res://scripts/opponent.gd")
+const Focus := preload("res://scripts/focus.gd")
 const GOLDEN := "res://tests/golden_random.json"
 
 ## energy may creep up a little from the step size alone, never more than this (J/kg)
@@ -50,6 +51,7 @@ func _init() -> void:
 	_suite_player()
 	_suite_rally()
 	_suite_match()
+	_suite_focus()
 	print("\nGodot: %s" % ("all good (%d checks)" % passed if failed == 0 else "%d failed, %d passed" % [failed, passed]))
 	quit(1 if failed else 0)
 
@@ -281,15 +283,18 @@ func _suite_controls() -> void:
 	for action in lab:
 		for b in Controls.ACTIONS[action].get("buttons", []):
 			_check(b > JOY_BUTTON_Y, "%s uses face button %d, keep those for the player" % [action, b])
-	# stick: past the deadzone moves, inside it doesn't
-	for case in [[JOY_AXIS_LEFT_X, -0.8, "move_left"], [JOY_AXIS_LEFT_X, 0.8, "move_right"], [JOY_AXIS_LEFT_Y, -0.8, "move_up"], [JOY_AXIS_LEFT_Y, 0.8, "move_down"]]:
-		var e := InputEventJoypadMotion.new()
-		e.axis = case[0]
-		e.axis_value = case[1]
-		e.device = 1
-		_check(e.is_action_pressed(case[2]), "stick %s %.1f should press %s" % [case[0], case[1], case[2]])
-		e.axis_value = case[1] * 0.1
-		_check(not e.is_action_pressed(case[2]), "stick inside the deadzone pressed %s" % case[2])
+	# stick: past the deadzone moves, inside it doesn't. The left trigger is focus
+	for case in [[JOY_AXIS_LEFT_X, -0.8, "move_left"], [JOY_AXIS_LEFT_X, 0.8, "move_right"], [JOY_AXIS_LEFT_Y, -0.8, "move_up"], [JOY_AXIS_LEFT_Y, 0.8, "move_down"], [JOY_AXIS_TRIGGER_LEFT, 1.0, "focus"]]:
+		for device in [1, 3]:
+			var e := InputEventJoypadMotion.new()
+			e.axis = case[0]
+			e.axis_value = case[1]
+			e.device = device
+			_check(e.is_action_pressed(case[2]), "pad %d axis %s %.1f should press %s" % [device, case[0], case[1], case[2]])
+			_check(_actions_for(e, all_actions) == [case[2]], "pad %d axis %s %.1f should press only %s, presses %s" % [device, case[0], case[1], case[2], _actions_for(e, all_actions)])
+			e.axis_value = case[1] * 0.1
+			_check(not e.is_action_pressed(case[2]), "axis inside the deadzone pressed %s" % case[2])
+	_check(KEY_SHIFT in Controls.ACTIONS.focus.keys and JOY_AXIS_TRIGGER_LEFT == Controls.ACTIONS.focus.axis[0], "focus should be on Shift and the left trigger")
 	Input.action_press("move_right", 1.0)
 	Input.action_press("move_up", 1.0)
 	var v := Controls.move_vector()
@@ -349,9 +354,22 @@ func _suite_player() -> void:
 	_check(p.start_swing(), "swing refused after the cooldown")
 	p.used_swing()
 	_check(not p.is_swinging() and not p.start_swing(), "a connected swing should end and start the cooldown")
+	# slow-mo: movement runs on delta, the swing on the clock (0.6x move, 0.4x world)
+	p.reset(Vector2(1.0, 5.0))
+	var q = PlayerNode.new()
+	q.reset(Vector2(1.0, 5.0))
+	p.start_swing()
+	var ticks := 0
+	while p.is_swinging() and ticks < 10000:
+		p.drive(Vector2.RIGHT, 0.6 * 0.001, 0.4 * 0.001)
+		q.drive(Vector2.RIGHT, 0.6 * 0.001)
+		ticks += 1
+	_check(absf(ticks * 0.4 * 0.001 - PlayerNode.SWING_ACTIVE) < 0.002, "slowed swing lasted %.3f s of world time, want %.3f" % [ticks * 0.4 * 0.001, PlayerNode.SWING_ACTIVE])
+	_check(p.pos().distance_to(q.pos()) < 1e-9 and p.vel.distance_to(q.vel) < 1e-9, "the swing clock changed how the body moves")
+	q.free()
 	# reach and band
 	p.reset(Vector2(5.0, 5.0))
-	var mid := (PlayerNode.BAND_LOW + PlayerNode.BAND_HIGH) * 0.5
+	var mid :=(PlayerNode.BAND_LOW + PlayerNode.BAND_HIGH) * 0.5
 	_check(p.can_reach(5.0 + PlayerNode.REACH * 0.99, 5.0, mid), "ball just inside reach not reachable")
 	_check(not p.can_reach(5.0, 5.0 + PlayerNode.REACH * 1.01, mid), "ball just outside reach was reachable")
 	_check(p.can_reach(5.0, 5.0, PlayerNode.BAND_LOW) and p.can_reach(5.0, 5.0, PlayerNode.BAND_HIGH), "band edges should count")
@@ -518,8 +536,138 @@ func _suite_match() -> void:
 	var stats := _match_long_run()
 	var tagged := _match_overlay()
 	stats += ", %d hits tagged" % tagged
-	_summary("match: far half, lobs, shot choice, scoring, serves, opponent vs opponent", before,
-		"(%d lobs, opponent returns %d%% of your drives, %s)" % [lobs, roundi(rate * 100.0), stats])
+	var rings := _match_last_bounce()
+	_summary("match: far half, lobs, shot choice, scoring, serves, opponent vs opponent, last bounce", before,
+		"(%d lobs, opponent returns %d%% of your drives, %s, %d last bounces predicted)" % [lobs, roundi(rate * 100.0), stats, rings])
+
+
+## the last-bounce ring: shots from both halves play out with nobody swinging. The
+## ring must appear exactly when the ball ends on a second bounce, and the spot and
+## time it gave while the ball was still in the air must match where it landed
+func _match_last_bounce() -> int:
+	var predicted := 0
+	var other := 0
+	for side in ["near", "far"]:
+		for xi in 5:
+			for yi in 4:
+				for shot in ["drive", "lob", "hard", "net", "long", "hot"]:
+					var n := _match_nodes()
+					var r = n[3]
+					r.state = "play"
+					var c := [1.0 + xi * 2.0, 1.0 + yi * 2.5, 1.0]
+					var vel: Array
+					match shot:
+						"drive":
+							vel = Planner.plan(c, 2.0 + xi * 1.5)
+						"lob":
+							vel = Planner.plan_lob(c, 2.0 + xi * 1.5)
+						# balls that never reach a second bounce: into the net, onto
+						# their glass before bouncing, over the side wall after one
+						"net":
+							vel = BallModel.launch(c, 12.0, 2.0, [5.0, 12.0])
+						"long":
+							vel = BallModel.launch(c, 28.0, 8.0, [5.0, 19.0])
+						"hot":
+							vel = BallModel.launch(c, 30.0, 18.0, [9.5, 15.0])
+						_:
+							vel = Planner.plan(c, 8.0 - xi * 1.5, Planner.TARGET_DEPTH, 22.0)
+					r._launch(side, c, vel)
+					var first := {}
+					var early := false
+					for i in 3600:
+						n[0]._physics_process(1.0 / 60.0)
+						var lb: Dictionary = r.last_bounce()
+						if not lb.is_empty():
+							if first.is_empty():
+								first = lb.duplicate()
+								first.t = n[0].model.t + lb.eta
+							_check(lb.side == r.receiver(), "the ring named %s, the receiver is %s" % [lb.side, r.receiver()])
+							_check(lb.at.distance_to(first.at) < 1e-9, "the landing spot moved while the ball flew")
+							_check(absf(n[0].model.t + lb.eta - first.t) < 1e-9, "the landing time drifted while the ball flew")
+						var floors: int = n[0].model.events.filter(func(e): return e.kind == "floor" and e.detail == "far").size()
+						early = early or (floors == 0 and not lb.is_empty())
+						if r.state == "over":
+							break
+					_check(not early, "a ring showed before the first bounce")
+					var landed: Array = n[0].model.events.filter(func(e): return e.kind == "floor" and e.detail == "far")
+					if n[0].model.end == "winner: second bounce" and landed.size() == 2:
+						_check(not first.is_empty(), "%s %s from %s: ended on a second bounce, the ring never showed" % [side, shot, c])
+						if not first.is_empty():
+							var at: Vector2 = Rules.to_court(side, landed[1].x, landed[1].y)
+							_check(first.at.distance_to(at) < 1e-9, "%s %s from %s: ring at %s, landed at %s" % [side, shot, c, first.at, at])
+							_check(absf(first.t - landed[1].t) < 1e-9, "%s %s from %s: ring said t %.4f, landed at %.4f" % [side, shot, c, first.t, landed[1].t])
+							predicted += 1
+					else:
+						other += 1
+						_check(first.is_empty(), "%s %s from %s: the ring showed for a ball that ended '%s'" % [side, shot, c, n[0].model.end])
+					_match_free(n)
+	_check(predicted >= 20, "only %d of the shots ended on a second bounce, the test isn't covering the ring" % predicted)
+	_check(other >= 1, "every shot ended on a second bounce, the no-ring case isn't covered")
+	return predicted
+
+
+# --- 9 ---------------------------------------------------------------------
+
+func _suite_focus() -> void:
+	var before := failed
+	var dt := 1.0 / 60.0
+	var f = Focus.new()
+	# not held: nothing changes, the world runs at full speed
+	for i in 120:
+		f.update(false, dt)
+	_check(not f.engaged and f.meter == 1.0 and f.world_scale() == 1.0 and f.player_scale() == 1.0, "idle focus changed something")
+	# held: drains in SECONDS, then locks
+	var held_s := 0.0
+	while f.engaged or held_s == 0.0:
+		f.update(true, dt)
+		held_s += dt
+		if held_s > Focus.SECONDS * 2.0:
+			break
+	_check(absf(held_s - Focus.SECONDS) < 0.1, "a full meter lasted %.2f s, want %.2f" % [held_s, Focus.SECONDS])
+	_check(f.meter == 0.0 and f.locked and not f.engaged, "a dry meter should lock")
+	for i in 60:
+		f.update(true, dt)
+	_check(not f.engaged, "slow-mo came back while the button was still held")
+	# slowed: the world is slower than you, you are slower than normal
+	var g = Focus.new()
+	for i in 30:
+		g.update(true, dt)
+	_check(g.engaged and absf(g.world_scale() - Focus.WORLD_SCALE) < 1e-9 and absf(g.player_scale() - Focus.PLAYER_SCALE) < 1e-9, "slow-mo didn't reach its scales: world %.3f, you %.3f" % [g.world_scale(), g.player_scale()])
+	_check(g.world_scale() < g.player_scale() and g.player_scale() < 1.0, "you should be faster than the world but slower than normal")
+	# letting go ends it and refills in REFILL seconds
+	var used: float = g.meter
+	var refill_s := 0.0
+	while g.meter < 1.0 and refill_s < Focus.REFILL * 2.0:
+		g.update(false, dt)
+		refill_s += dt
+	_check(not g.engaged and g.world_scale() < 1.0 + 1e-9, "slow-mo stayed on after letting go")
+	_check(absf(refill_s - (1.0 - used) * Focus.REFILL) < 0.1, "refill took %.2f s, want %.2f" % [refill_s, (1.0 - used) * Focus.REFILL])
+	for i in 30:
+		g.update(false, dt)
+	_check(g.blend == 0.0 and g.world_scale() == 1.0, "the world didn't return to full speed")
+	# after running dry: let go, wait for MIN_START, then it works again, not before
+	var h = Focus.new()
+	h.meter = 0.0
+	h.locked = true
+	h.update(true, dt)
+	_check(not h.engaged, "a locked meter engaged")
+	h.update(false, dt)
+	h.update(true, dt)
+	_check(not h.engaged, "engaged with the meter under MIN_START")
+	for i in int(Focus.MIN_START * Focus.REFILL / dt) + 2:
+		h.update(false, dt)
+	h.update(true, dt)
+	_check(h.engaged and not h.locked, "refilled past MIN_START and let go, but it won't engage")
+	# invariants over a random hold pattern
+	var rng := RandomNumberGenerator.new()
+	rng.seed = 7
+	var k = Focus.new()
+	var ok := true
+	for i in 20000:
+		k.update(rng.randf() < 0.5 if i % 60 == 0 else k.engaged or rng.randf() < 0.02, dt)
+		ok = ok and k.meter >= 0.0 and k.meter <= 1.0 and k.blend >= 0.0 and k.blend <= 1.0 and k.world_scale() >= Focus.WORLD_SCALE - 1e-9
+	_check(ok, "meter or blend left its range under a random hold pattern")
+	_summary("focus: slow-mo meter, scales, lock and refill", before)
 
 
 ## a match with no brains: the test drives everything

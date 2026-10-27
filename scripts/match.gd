@@ -6,11 +6,13 @@ extends Node2D
 ## move                WASD         left stick
 ## swing / serve       J            A (cross)
 ## aim your shot       hold A/D     stick left/right while you swing
-## slow motion         T            D-pad up      1x, 0.5x, 0.25x
+## focus (slow-mo)     hold Shift   hold L2        drains while held, refills after
+## test speed          T            D-pad up      1x, 0.5x, 0.25x, for tuning
 ## menu                Esc          Start         pick vs the opponent or watch
 ## stats panel         Tab          from the menu
+## A ring on the court marks where the ball lands for its last bounce.
 ## Bindings live in scripts/controls.gd. Rules live in match_rules.gd,
-## the opponent and its difficulty knobs in opponent.gd.
+## the opponent and its difficulty knobs in opponent.gd, slow-mo in focus.gd.
 ##
 ## Optional: godot --path . -- --demo   starts in opponent vs opponent
 
@@ -20,6 +22,7 @@ const Rules := preload("res://scripts/match_rules.gd")
 const Opponent := preload("res://scripts/opponent.gd")
 const BallView := preload("res://scripts/ball.gd")
 const Menu := preload("res://scripts/match_menu.gd")
+const Focus := preload("res://scripts/focus.gd")
 
 const SPEEDS := [1.0, 0.5, 0.25]
 ## pause after a point, game seconds
@@ -28,8 +31,19 @@ const PAUSE := 1.2
 const GAUGE_FLOOR := Vector2(835, 640)
 const GAUGE_PPM := 60.0
 
-const KEY_HINT := "WASD move    J swing    T slow    Tab stats + overlay    Esc menu"
-const PAD_HINT := "Stick move    A swing    D-pad up slow    Start menu"
+const KEY_HINT := "WASD move    J swing    Shift focus    T speed    Tab stats + overlay    Esc menu"
+const PAD_HINT := "Stick move    A swing    L2 focus    D-pad up speed    Start menu"
+
+## last-bounce ring: it shrinks onto the landing spot over this many ball seconds,
+## turns red in the last RING_RED, court m radii
+const RING_START := 1.0
+const RING_RED := 0.3
+const RING_BIG := 1.2
+const RING_SMALL := 0.25
+## focus meter bar, bottom left above the hints
+const FOCUS_BAR := Rect2(40, 656, 200, 10)
+const FOCUS_COLOR := Color("#4fc3f7")
+const FOCUS_LOCKED := Color("#e74c3c")
 
 # --- HUD look ---
 const CARD_BG := Color(0.08, 0.09, 0.11, 0.88)
@@ -44,7 +58,7 @@ const STRAIN_COLORS := {
 }
 ## pop-up labels and landing marks live this long, real seconds
 const POP_LIFE := 1.2
-const LOG_HEADER := "row,point,shot,side,came,kind,net,lob,contact_x,contact_y,height,land_x,land_y,pressure,strain,winner,result,by,cause"
+const LOG_HEADER := "row,point,shot,side,came,kind,net,lob,contact_x,contact_y,height,land_x,land_y,pressure,strain,slow,winner,result,by,cause"
 
 ## readable endings for the ball model's results
 const ENDINGS := {
@@ -77,6 +91,7 @@ var opponent
 ## demo mode only: a second brain playing your side
 var stand_in
 var speed_i := 0
+var focus = Focus.new()
 var wait := 0.0
 
 var _score_you: Label
@@ -118,17 +133,22 @@ func _on_mode_picked(demo: bool) -> void:
 
 func _physics_process(delta: float) -> void:
 	# runs before the ball (a child), so both players move first each tick
-	var scale: float = SPEEDS[speed_i]
+	# focus runs on real time. The ball, the opponent and your swing follow the
+	# world's clock, your movement a bit faster than that
+	focus.update(Input.is_action_pressed("focus") and rules.state == "play", delta)
+	var scale: float = SPEEDS[speed_i] * focus.world_scale()
 	var dt := delta * scale
+	var move_dt: float = delta * SPEEDS[speed_i] * focus.player_scale()
 	var stick := Controls.move_vector()
 	if stand_in:
 		stand_in.tick(dt)
 	elif rules.state == "serve":
 		player.tick(Vector2.ZERO, dt)   # hold your spot until the serve
 	else:
-		player.tick(stick, dt)
+		player.tick(stick, move_dt, dt)
 	opponent.tick(dt)
 	rules.aim = stick.x
+	rules.slow_mo = focus.engaged
 	rules.tick(dt)
 	ball.time_scale = scale
 	player.ball_in_reach = rules.in_reach("near")
@@ -207,10 +227,10 @@ func _write_point() -> void:
 	var r = rules
 	var n: int = r.points
 	for h in r.hits:
-		_log.store_line("hit,%d,%d,%s,%s,%s,%s,%s,%.2f,%.2f,%.2f,%.2f,%.2f,%.2f,%.2f,,,," % [
+		_log.store_line("hit,%d,%d,%s,%s,%s,%s,%s,%.2f,%.2f,%.2f,%.2f,%.2f,%.2f,%.2f,%s,,,," % [
 			n, h.shot, h.side, h.came, h.kind, h.net, h.lob,
-			h.x, h.y, h.z, h.land_x, h.land_y, h.pressure, h.strain])
-	_log.store_line("point,%d,,,,,,,,,,,,,,%s,\"%s\",%s,\"%s\"" % [n, r.last_winner, r.last_result, r.last_by, r.last_cause])
+			h.x, h.y, h.z, h.land_x, h.land_y, h.pressure, h.strain, h.slow])
+	_log.store_line("point,%d,,,,,,,,,,,,,,,%s,\"%s\",%s,\"%s\"" % [n, r.last_winner, r.last_result, r.last_by, r.last_cause])
 	_log.flush()
 
 
@@ -300,7 +320,7 @@ func _update_info() -> void:
 		return
 	var h: Dictionary = r.your_hits
 	var t := "Rally %d hits   longest %d\n" % [r.rally_len, r.longest_rally]
-	t += "Speed %sx\n\n" % SPEEDS[speed_i]
+	t += "Speed %sx   focus used %.1f s\n\n" % [SPEEDS[speed_i], focus.used]
 	t += "Your hits\n  volley %d\n  after the bounce %d\n  off the glass %d\n" % [h.volley, h.bounce, h.glass]
 	if not r.your_heights.is_empty():
 		var sum := 0.0
@@ -336,8 +356,36 @@ func _draw() -> void:
 	var z: float = clampf(rules.ball_court().z, 0.0, 4.0)
 	draw_circle(GAUGE_FLOOR - Vector2(0, z * GAUGE_PPM), 6.0, BallView.height_color(z))
 	draw_string(ThemeDB.fallback_font, top - Vector2(14, 10), "height", HORIZONTAL_ALIGNMENT_LEFT, -1, 12)
+	_draw_last_bounce()
+	_draw_focus()
 	if stats_on:
 		_draw_overlay()
+
+
+## the ball's last bounce: a ring that closes on the landing spot. Bright when it
+## lands on your half, dim when it lands on theirs
+func _draw_last_bounce() -> void:
+	var lb: Dictionary = rules.last_bounce()
+	if lb.is_empty():
+		return
+	var c := _px(lb.at)
+	var k := clampf(lb.eta / RING_START, 0.0, 1.0)
+	var color := Color("#ff3b30") if lb.eta <= RING_RED else Color("#ffd60a")
+	color.a = 1.0 if lb.side == "near" else 0.45
+	var r := lerpf(RING_SMALL, RING_BIG, k) * Court.PPM
+	draw_arc(c, r, 0.0, TAU, 40, color, 3.0)
+	draw_circle(c, 3.0, color)
+
+
+## the focus meter, and a blue wash over the whole screen while time is slowed
+func _draw_focus() -> void:
+	if focus.blend > 0.0:
+		draw_rect(Rect2(Vector2.ZERO, get_viewport_rect().size), Color(0.2, 0.55, 0.9, 0.12 * focus.blend))
+	draw_rect(FOCUS_BAR, Color(1, 1, 1, 0.15))
+	var color := FOCUS_LOCKED if focus.locked else FOCUS_COLOR
+	draw_rect(Rect2(FOCUS_BAR.position, Vector2(FOCUS_BAR.size.x * focus.meter, FOCUS_BAR.size.y)), color)
+	draw_string(ThemeDB.fallback_font, FOCUS_BAR.position + Vector2(FOCUS_BAR.size.x + 10, 10),
+		"FOCUS  %s" % ("L2" if Controls.using_gamepad else "Shift"), HORIZONTAL_ALIGNMENT_LEFT, -1, 12, DIM)
 
 
 ## court meters to this node's pixels

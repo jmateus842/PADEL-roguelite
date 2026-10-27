@@ -67,7 +67,7 @@ var opp_lobs := 0
 ## came (volley, bounce, glass, serve), kind (cross, line, mid, serve),
 ## net (hit from the net zone), lob, x, y, z (contact, court), land_x,
 ## land_y (first bounce, court), pressure and strain (the receiving brain's
-## read of it, -1 for you)
+## read of it, -1 for you) and slow (your slow-mo was on for your hit)
 var hits: Array[Dictionary] = []
 ## your shots by kind, and the ones that won the point
 var tally := {
@@ -84,6 +84,13 @@ var lobbed_at_net := 0
 ## away ("easy", "working", "stretched" or "")
 var last_cause := ""
 var last_whiff := ""
+
+## the scene sets this every tick: your slow-mo is on. Goes into each hit record
+var slow_mo := false
+# last_bounce() looks ahead once per shot and keeps the answer
+var _last_for := -1
+var _last_t := -1.0
+var _last_at := Vector2.ZERO
 
 
 func _init(ball_node, near_body, far_body) -> void:
@@ -150,6 +157,36 @@ func in_reach(side: String) -> bool:
 		return false
 	var b := ball_court()
 	return bodies[side].can_reach(b.x, b.y, b.z)
+
+
+## the ball's last chance: it has bounced once on the receiving half, so its
+## next floor contact ends the point unless someone hits it first. Returns
+## {"at": where it lands (court m), "eta": ball seconds until it lands,
+## "side": who it lands on}, or {} when the ball isn't in that state, or will
+## go out through a wall before landing
+func last_bounce() -> Dictionary:
+	if state != "play" or ball.model.is_done():
+		return {}
+	var floors := 0
+	for e in ball.model.events:
+		if e.kind == "floor" and e.detail == "far":
+			floors += 1
+	if floors != 1:
+		return {}
+	if _last_for != shot_id:
+		_last_for = shot_id
+		_last_t = -1.0
+		var sim = ball.model.clone()
+		while not sim.is_done() and _last_t < 0.0:
+			sim.step()
+			for e in sim.events:
+				if e.kind == "floor" and e.detail == "far":
+					_last_t = e.t
+					_last_at = to_court(last_hitter, e.x, e.y)
+					break
+	if _last_t < 0.0:
+		return {}
+	return {"at": _last_at, "eta": maxf(_last_t - ball.model.t, 0.0), "side": receiver()}
 
 
 ## server on the right on even points, on the left on odd ones, receiver
@@ -233,7 +270,7 @@ func _record(side: String, b: Vector3, came: String) -> void:
 		"net": came != "serve" and to_model(side, b)[1] >= BallModel.NET_Y - NET_ZONE,
 		"lob": came != "serve" and brains.has(side) and brains[side].last_was_lob,
 		"x": b.x, "y": b.y, "z": b.z, "land_x": land.x, "land_y": land.y,
-		"pressure": -1.0, "strain": -1.0,
+		"pressure": -1.0, "strain": -1.0, "slow": slow_mo and side == "near",
 	}
 	# the brain that just hit read this ball before it swung
 	if brains.has(side) and came != "serve":

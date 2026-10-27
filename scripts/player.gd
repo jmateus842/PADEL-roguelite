@@ -57,12 +57,16 @@ func reset(at := Vector2(5.0, 2.5)) -> void:
 
 
 ## stick or WASD as given by Controls.move_vector(): screen up is toward the net
-func tick(stick: Vector2, delta: float) -> void:
-	drive(Vector2(stick.x, -stick.y), delta)
+func tick(stick: Vector2, delta: float, clock := -1.0) -> void:
+	drive(Vector2(stick.x, -stick.y), delta, clock)
 
 
-## dir in court axes (+y runs from the near back wall to the far one), length 0 to 1
-func drive(dir: Vector2, delta: float) -> void:
+## dir in court axes (+y runs from the near back wall to the far one), length 0 to 1.
+## delta moves the body. clock runs the swing, its cooldown and the flash, and
+## defaults to delta. Slow-mo (focus.gd) gives you a longer delta than the
+## world's clock, so you run faster while the swing keeps the ball's timing
+func drive(dir: Vector2, delta: float, clock := -1.0) -> void:
+	var swing_dt := delta if clock < 0.0 else clock
 	var want := dir.limit_length(1.0) * top_speed
 	vel = vel.move_toward(want, ACCEL * delta)
 	px += vel.x * delta
@@ -76,12 +80,12 @@ func drive(dir: Vector2, delta: float) -> void:
 	px = clampf(px, lo.x, hi.x)
 	py = clampf(py, lo.y, hi.y)
 	if swing_left > 0.0:
-		swing_left -= delta
+		swing_left -= swing_dt
 		if swing_left <= 0.0:
 			cooldown_left = COOLDOWN
 	elif cooldown_left > 0.0:
-		cooldown_left -= delta
-	flash = maxf(flash - delta, 0.0)
+		cooldown_left -= swing_dt
+	flash = maxf(flash - swing_dt, 0.0)
 	queue_redraw()
 
 

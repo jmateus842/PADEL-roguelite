@@ -2,10 +2,10 @@
 
 Log of ongoing work and decisions, so a new session can pick up where the last one stopped. Format: `rules/template-session.md`.
 
-## Project status (as of 2026-10-19)
+## Project status (as of 2026-10-27)
 
-* **Current priority:** zone-based opponent shots, starting with a wider lob trigger (3.5 m to about 6 m), then shot buttons with contact quality. Plan and order in `design/glass-panels.md`. Run `run_tests.bat` after every change to the ball, player, rally or opponent.
-* **Playcentric step:** 5. Playtest 1 in the match done with the overlay (Session 15). Back to step 4 changes the playtest asked for, one per playtest.
+* **Current priority:** playtest the last-bounce ring and the L2 slow-mo (Session 17) together with the 6 m lob trigger (about 30 points of log, only 5 so far), then design how the player chooses to use the wall (`design/padel-wall-situations.md`), then shot buttons with contact quality. Plan and order in `design/glass-panels.md`. Run `run_tests.bat` after every change to the ball, player, rally or opponent.
+* **Playcentric step:** 5. Playtest 1 done (Session 15), a short playtest 2 of the wider lob trigger done (Session 16). Back to step 4 changes the playtest asked for, one per playtest. Session 17 added two at once (ring and slow-mo), so read the log for slow-mo use before judging the lob trigger.
 * **Known blockers:** None.
 * **Active known issues:**
     * Padel origin and Balatro release date in the goals doc came from memory and still need checking (from Session 1).
@@ -13,6 +13,8 @@ Log of ongoing work and decisions, so a new session can pick up where the last o
     * The "ball died" rule never fired in 60,000 random launches. It may be dead code (from Session 4).
     * **Ready to test: volley vs. bounce.** The opponent now lobs when you stand within 3.5 m of the net, and the match HUD counts your volleys, bounce hits and glass hits. Run the Session 8 protocol in the match (from Session 7, opponent in Session 10).
     * Playtest 1 (Session 15): you volley 68 of 110 shots and play 4 off the glass, the opponent never lobs you (your volleys sit 4.4 m from the net, outside its 3.5 m trigger), and nobody ever misses a shot. Every swing makes a perfect shot. See `design/glass-panels.md`.
+    * Playtest 2 (Session 16), only 5 points: with `LOB_WHEN` at 6 m the opponent lobbed 3 times and 5 of your 22 shots came off the glass (23%, was 4%). Lobs won no point. Too small to settle anything. Change not committed yet.
+    * **Ready to test: last-bounce ring and slow-mo (Session 17).** A ring on the court shows where the ball lands on its last bounce. Hold L2 (Shift on keyboard) to slow the world to 0.4x while you move at 0.6x. Numbers in `scripts/focus.gd` are guesses (3 s of slow-mo, 10 s refill). Not played by hand yet, and the L2 binding was only checked with fake events, not a real trigger.
     * Match rules are simplified: the serve changes sides every point, serves are auto-aimed into the box (no service faults), and the score is a plain point count (from Session 10).
 * **Technical debt:**
     * A GDScript runtime error inside the suite prints SCRIPT ERROR but doesn't fail the run. Session 14 hit one that only showed in the log. Make the runner fail on it (from Session 14).
@@ -20,6 +22,106 @@ Log of ongoing work and decisions, so a new session can pick up where the last o
     * `shot_planner.gd` (moved out of `rally.gd`, now shared by you, the opponent and the practice court) plans shots with its own light copy of the ball's flight (drag, gravity, net). Change the model's tuning and the planner drifts. The return and lob grid tests catch it (from Session 7, moved in Session 10).
     * The practice court and the match reuse the `lab_*` actions (Space, T, R, arrows). The match uses `lab_speed` for slow motion, so a second scene needs them now. Rename to shared names soon. `lab_replay` moved from Start to R3 when Start became the menu (from Session 7, Session 11).
     * `tests/golden_random.json` is tracked but rewritten on every test run. Runs on different machines change the last digit of some floats, so git shows it as modified. Harmless (the Godot check allows 1e-9 m), but decide whether to gitignore it (from Session 9).
+
+---
+
+## 2026-10-27 (Session 17) – Last-bounce ring and slow-mo focus meter [Prototype] [Input]
+
+### Handoff
+
+* **Result:** the match now shows a ring where the ball lands on its last bounce, and holding L2 (Shift on keyboard) slows the world with a meter that drains while held and refills after. Every input has a gamepad binding, since JD tests with a controller.
+* **Why it matters:** the ring tells you when a ball is about to end the point, and the slow-mo gives you time to read a glass rebound and a limited way to save a ball. Both feed the wall decision brainstorm: waiting for the glass is easier to judge when you can see the end of the ball's life.
+* **Next recommended action:** play with the ring on and use slow-mo, then read the log's `slow` column and the stats card's "focus used" line. Tune `scripts/focus.gd` from that.
+
+### Accomplished
+
+* `scripts/match_rules.gd`: `last_bounce()` returns where and when (ball seconds) the ball lands if nobody hits it, once it has bounced once on the receiving half. It steps a clone of the ball once per shot and keeps the answer. Empty before the first bounce, when the ball will leave through a wall instead, or when the point is over.
+* `scripts/match.gd`: draws the ring on the landing spot, shrinking over the last second and red for the last 0.3 s. Bright when it lands on your half, dim on theirs. Always on, not only with Tab. Also draws the focus bar (bottom left, "FOCUS L2" or "Shift") and a blue wash while time is slowed.
+* `scripts/focus.gd` — **New**: the meter. Hold drains it in 3 s, release refills it in 10 s. When it runs dry it locks until you let go and it holds 10%. World runs at 0.4x, your movement at 0.6x, eased in and out.
+* `scripts/player.gd`: `tick`/`drive` take an optional `clock`. Movement uses the (faster) delta, the swing, cooldown and flash use the world's clock, so slow-mo doesn't shrink the hit window.
+* `scripts/controls.gd`: new `focus` action on Shift and the left trigger (`JOY_AXIS_TRIGGER_LEFT`). T and D-pad up stay as a test speed.
+* Log: new `slow` column (your hit happened with slow-mo on). Stats card shows "focus used". Header changed, old logs have one column fewer.
+* `tests/godot_tests.gd`: trigger on any pad presses only `focus`, a swing keeps the world's clock while the body runs on delta, suite 9 for the meter (drain, lock, refill, scales, random hold pattern), and 130 shots from both halves checking the ring against where the ball really landed (spot and time within 1e-9), including shots that never reach a second bounce.
+
+#### Decisions
+* Slow-mo is the middle option: the world slows more than you do, so you gain ground without full speed. JD's idea.
+* The swing stays on the world's clock. Mine.
+* Always add controller support for new input. Saved as a memory.
+* Slow-mo only drains and engages while the ball is in play.
+
+### Verified
+
+* `run_tests.bat` pieces run on Windows (JD's machine, Godot 4.5 console): Python all good, Godot all good (27,694 checks, up from 5,755).
+* Planted two bugs and restored each: swing on the move clock (1 failure), landing time off by 0.01 s (many failures). Clean run passes after restoring.
+* Ran the match headless in watch mode: no script errors, the log has the new column on hit and point rows.
+* Rendered the real scene in watch mode and looked at frames: the yellow ring sits on the landing spot after the first bounce, the bar and L2 hints show.
+* Not verified: the blue wash while slowed, the red ring colour, and feel. No hand play, no real L2 trigger (only fake events). `scripts/focus.gd.uid` isn't created until the editor opens the project.
+
+### Deferred / Follow-up
+
+1. Play with the ring and slow-mo, send the newest log. Questions: do you use slow-mo, when, does the meter feel too big or small, does the ring make last-second saves too easy.
+2. Judge the 6 m lob trigger from the same log (Session 16).
+3. Continue the wall decision brainstorm. Slow-mo gives time to read a rebound, so it may change what waiting buys.
+4. If a real trigger rests at -1 or doesn't reach 0.25, the `focus` axis binding needs a look.
+
+### Files Touched
+
+* `scripts/focus.gd` — **New** — slow-mo meter
+* `scripts/match_rules.gd` — **Edit** — `last_bounce()`, `slow_mo`, `slow` in hit records
+* `scripts/match.gd` — **Edit** — ring, focus bar and wash, time scales, log column, stats line, hints
+* `scripts/player.gd` — **Edit** — swing clock
+* `scripts/controls.gd` — **Edit** — `focus` action
+* `tests/godot_tests.gd` — **Edit** — trigger, swing clock, focus suite, ring check
+* `progress.md` — **Edit** — this entry and status block
+
+### Status Update
+
+* Priority now includes playtesting the ring and slow-mo. Added the Session 17 known issue.
+
+---
+
+## 2026-10-27 (Session 16) – Wider lob trigger tried, wall decision mechanic started [Playtest] [Design] [Opponent]
+
+### Handoff
+
+* **Result:** `LOB_WHEN` in `scripts/opponent.gd` went from 3.5 m to 6.0 m (uncommitted), the suite passes, and a 5-point playtest shows the opponent lobbing and more balls reaching the glass. A reference doc of 14 real padel wall situations is saved for designing the player's wall decision.
+* **Why it matters:** "walls feel like a tool" was failing (4 of 110 shots off the glass). The wider lob zone is the first step of the zone-based plan, and the wall decision mechanic is what makes waiting for the glass worth it.
+* **Next recommended action:** play about 30 points with Tab on and read the newest log: opponent lobs, glass hits, volleys, and whether the 6 m zone locks you out of the net. Then continue the wall decision brainstorm (see Deferred).
+
+### Accomplished
+
+* `scripts/opponent.gd`: `LOB_WHEN` 3.5 to 6.0, the "about 6 m" from `design/glass-panels.md`. The overlay's net zone and the NET tag follow it, so net-shot tallies no longer compare with Session 15.
+* Playtest 2, log `logs/match_2026-10-27T14-21-09.csv` (local, gitignored): 5 points (you 3, opponent 2), 49 hits, 22 of them yours.
+    * Opponent lobs 3 (was 0). Your glass hits 5 of 22 (23%, was 4%). Your volleys 9 of 22 (41%, was 62%). 10 of 22 flagged NET.
+    * Your 3 points were whiffs (2 stretched, 1 working). The opponent's 2 were its crosscourt drives. No lob won a point. All 5 ended on a second bounce.
+* `design/padel-wall-situations.md` — **New**: 14 padel wall situations from a friend's text (trigger, positions, decision, ball, movement, shot, failure, and whether the current model can show it), plus rules, decision factors, rules of thumb and open questions. Written for a model to read.
+* Brainstorm started on the player choosing the direction of a hit (using the back wall). Only the first question was asked: what the wall decision should feel like. Nothing decided.
+
+#### Decisions
+* None durable. The wider lob trigger stays on trial until the log is bigger.
+
+### Verified
+
+* `run_tests.bat` on Windows (JD): Python all good, Godot all good (5,755 checks). The match line is identical to Session 13 and 14 (85% returns, 150 points, median rally 9), so the suite does not exercise the 3.5 to 6 m band. Only a hand playtest does.
+* Playtest log read with a script over the CSV. The sample is 5 points, so the numbers are a hint only.
+* Wall situations doc: not checked against footage. Only the court dimensions were compared with `scripts/ball_model.gd`; wall heights, the glass/mesh split and rebound numbers come from the source text.
+
+### Deferred / Follow-up
+
+1. Play about 30 points and read the log. If glass hits stay well above 4% and the net still feels playable, keep 6 m and commit. If the net feels locked, try a value between 3.5 and 6.
+2. Continue the wall decision brainstorm. Open questions: aim by input or by shot button, what waiting gains (time, contact quality, glass panel effect), whether waiting costs net position, whether contrapared is a shot of its own.
+3. Do not commit `tests/golden_random.json` with the lob change.
+4. Shot buttons with contact quality, then the glass panel prototype (unchanged from Session 15).
+
+### Files Touched
+
+* `scripts/opponent.gd` — **Edit** — `LOB_WHEN` 6.0 (uncommitted)
+* `design/padel-wall-situations.md` — **New** — reference for the wall decision mechanic
+* `progress.md` — **Edit** — this entry and status block
+
+### Status Update
+
+* Priority now covers judging the 6 m trigger, then the wall decision design. Playcentric step notes playtest 2. Added the Session 16 known issue.
 
 ---
 

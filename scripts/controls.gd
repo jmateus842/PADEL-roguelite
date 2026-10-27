@@ -34,6 +34,8 @@ const ACTIONS := {
 	# opens and closes the match menu. Inside the menu, Godot's built-in ui_*
 	# actions move and pick (arrows or D-pad or stick, Enter or A, Esc or B)
 	"menu": {"keys": [KEY_ESCAPE], "buttons": [JOY_BUTTON_START]},
+	# slow-mo focus: hold Shift or the left trigger (L2 on PlayStation)
+	"focus": {"keys": [KEY_SHIFT], "axis": [JOY_AXIS_TRIGGER_LEFT, 1.0]},
 	# match stats panel. On a gamepad it's in the menu
 	"stats": {"keys": [KEY_TAB]},
 }
