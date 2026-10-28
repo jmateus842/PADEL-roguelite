@@ -44,6 +44,9 @@ var last_hitter := ""
 var shot_id := 0
 ## stick x when you hit, -1 to 1. The scene sets it every tick
 var aim := 0.0
+## right stick in court axes (x right, y toward their half), length 0 to 1.
+## The scene sets it every tick. At rest the sideways nudge above applies
+var aim_dir := Vector2.ZERO
 var serve_wait := AUTO_SERVE
 
 var score := {"near": 0, "far": 0}
@@ -244,24 +247,41 @@ func try_hit() -> bool:
 	var contact := to_model(side, b)
 	var came := _how_it_came()
 	var vel: Array
+	var aimed := {}
 	if brains.has(side):
 		vel = brains[side].choose_shot(contact)
 		if brains[side].last_was_lob and side == "far":
 			opp_lobs += 1
 	else:
-		vel = Planner.plan(contact, 5.0 + clampf(aim, -1.0, 1.0) * Planner.AIM_SPREAD)
+		var choice := Planner.aim_choice(contact[0], contact[1], aim, aim_dir)
+		# what the swing did, for the log: the stick, the zone it aimed at, and the shot
+		# "nudge" is a resting stick, "contra_fallback" a back push that became a drive
+		aimed = {"shot_type": "nudge" if aim_dir.length() < Planner.AIM_REST else choice.kind,
+			"stick": aim_dir, "nudge": aim, "zone": choice.land}
+		if choice.kind == "contra":
+			vel = Planner.plan_contrapared(contact, choice.x)
+			if vel.is_empty():
+				aimed.shot_type = "contra_fallback"
+		if vel.is_empty():
+			# a plain drive to the zone, or the contrapared isn't possible from here and
+			# the drive goes to the same side
+			var land: Vector2 = choice.land
+			if choice.kind == "drive":
+				vel = Planner.plan_to(contact, land, choice.pace)
+			else:
+				vel = Planner.plan(contact, land.x)
 	if side == "near":
 		your_hits[came] += 1
 		your_heights.append(b.z)
 	bodies[side].used_swing()
 	_launch(side, contact, vel)
-	_record(side, b, came)
+	_record(side, b, came, aimed)
 	return true
 
 
 ## log the shot just launched: where it was hit, where it will first bounce,
 ## what kind it is. Your shots go into the tally
-func _record(side: String, b: Vector3, came: String) -> void:
+func _record(side: String, b: Vector3, came: String, aimed := {}) -> void:
 	var land := _landing(side)
 	var receiver_brain = brains.get(other(side))
 	var rec := {
@@ -271,6 +291,11 @@ func _record(side: String, b: Vector3, came: String) -> void:
 		"lob": came != "serve" and brains.has(side) and brains[side].last_was_lob,
 		"x": b.x, "y": b.y, "z": b.z, "land_x": land.x, "land_y": land.y,
 		"pressure": -1.0, "strain": -1.0, "slow": slow_mo and side == "near",
+		# where you stood when this ball was hit (for their shots: did they see you at the net)
+		"you": bodies["near"].pos(),
+		"shot_type": "serve" if came == "serve" and side == "near" else aimed.get("shot_type", ""),
+		"stick": aimed.get("stick", Vector2.ZERO), "nudge": aimed.get("nudge", 0.0),
+		"zone": aimed.get("zone", Vector2(-1.0, -1.0)),
 	}
 	# the brain that just hit read this ball before it swung
 	if brains.has(side) and came != "serve":

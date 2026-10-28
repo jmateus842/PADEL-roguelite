@@ -4,8 +4,10 @@ extends Node2D
 ##
 ##                     keyboard     gamepad
 ## move                WASD         left stick
-## swing / serve       J            A (cross)
-## aim your shot       hold A/D     stick left/right while you swing
+## swing / serve       J            RT or RB (right trigger or bumper)
+## aim your shot       hold A/D     right stick, any direction. Back toward your own
+##                                  glass (near it) plays the contrapared. Resting the
+##                                  right stick falls back to left stick x (A/D)
 ## focus (slow-mo)     hold Shift   hold L2        drains while held, refills after
 ## test speed          T            D-pad up      1x, 0.5x, 0.25x, for tuning
 ## menu                Esc          Start         pick vs the opponent or watch
@@ -23,6 +25,8 @@ const Opponent := preload("res://scripts/opponent.gd")
 const BallView := preload("res://scripts/ball.gd")
 const Menu := preload("res://scripts/match_menu.gd")
 const Focus := preload("res://scripts/focus.gd")
+const Planner := preload("res://scripts/shot_planner.gd")
+const Aim := preload("res://scripts/aim.gd")
 
 const SPEEDS := [1.0, 0.5, 0.25]
 ## pause after a point, game seconds
@@ -32,7 +36,7 @@ const GAUGE_FLOOR := Vector2(835, 640)
 const GAUGE_PPM := 60.0
 
 const KEY_HINT := "WASD move    J swing    Shift focus    T speed    Tab stats + overlay    Esc menu"
-const PAD_HINT := "Stick move    A swing    L2 focus    D-pad up speed    Start menu"
+const PAD_HINT := "Stick move    Right stick aim    RT swing    L2 focus    D-pad up speed    Start menu"
 
 ## last-bounce ring: it shrinks onto the landing spot over this many ball seconds,
 ## turns red in the last RING_RED, court m radii
@@ -40,6 +44,21 @@ const RING_START := 1.0
 const RING_RED := 0.3
 const RING_BIG := 1.2
 const RING_SMALL := 0.25
+## aim hint: a ring around you and a short arrow out of it pointing where your
+## swing sends the ball. Radii and lengths in court m. Dim while the ball is
+## coming, bright once it is in reach
+const AIM_RING := 0.8
+const AIM_ARROW := 0.7
+const AIM_HEAD := 0.3
+## how bright the ring is: ball in reach 1.0, coming but out of reach, nothing to hit
+const AIM_COMING := 0.45
+const AIM_IDLE := 0.2
+## the arrow and the glow follow the stick with this smoothing, per second
+const AIM_SMOOTH := 18.0
+## the glow on the zone your swing is aimed at, court m
+const GLOW_RADIUS := 0.9
+## the arrow and the back of the ring when the swing plays your own glass
+const AIM_GLASS := Color("#ffa726")
 ## focus meter bar, bottom left above the hints
 const FOCUS_BAR := Rect2(40, 656, 200, 10)
 const FOCUS_COLOR := Color("#4fc3f7")
@@ -58,7 +77,7 @@ const STRAIN_COLORS := {
 }
 ## pop-up labels and landing marks live this long, real seconds
 const POP_LIFE := 1.2
-const LOG_HEADER := "row,point,shot,side,came,kind,net,lob,contact_x,contact_y,height,land_x,land_y,pressure,strain,slow,winner,result,by,cause"
+const LOG_HEADER := "row,point,shot,side,came,kind,net,lob,contact_x,contact_y,height,land_x,land_y,pressure,strain,slow,winner,result,by,cause,you_x,you_y,shot_type,stick_x,stick_y,nudge,zone_x,zone_y"
 
 ## readable endings for the ball model's results
 const ENDINGS := {
@@ -92,6 +111,7 @@ var opponent
 var stand_in
 var speed_i := 0
 var focus = Focus.new()
+var aim_memory = Aim.new()
 var wait := 0.0
 
 var _score_you: Label
@@ -107,6 +127,9 @@ var _menu
 var _pops: Array[Dictionary] = []
 var _seen_shot := 0
 var _seen_points := 0
+## smoothed aim visuals: the arrow direction (court axes) and the glow spot (court m)
+var _arrow := Vector2(0.0, 1.0)
+var _glow := Vector2(5.0, Planner.TARGET_DEPTH)
 var _log: FileAccess
 
 
@@ -133,6 +156,12 @@ func _on_mode_picked(demo: bool) -> void:
 
 func _physics_process(delta: float) -> void:
 	# runs before the ball (a child), so both players move first each tick
+	# swing is read as an edge: the trigger is an axis and fires while held
+	if Input.is_action_just_pressed("swing") and not stand_in:
+		if rules.state == "serve" and rules.server == "near":
+			rules.serve()
+		else:
+			player.start_swing()
 	# focus runs on real time. The ball, the opponent and your swing follow the
 	# world's clock, your movement a bit faster than that
 	focus.update(Input.is_action_pressed("focus") and rules.state == "play", delta)
@@ -148,6 +177,9 @@ func _physics_process(delta: float) -> void:
 		player.tick(stick, move_dt, dt)
 	opponent.tick(dt)
 	rules.aim = stick.x
+	var aim_stick := Controls.aim_vector()
+	# screen up is toward their half. A flick still counts for a moment after the thumb lets go
+	rules.aim_dir = aim_memory.update(Vector2(aim_stick.x, -aim_stick.y), delta)
 	rules.slow_mo = focus.engaged
 	rules.tick(dt)
 	ball.time_scale = scale
@@ -161,12 +193,7 @@ func _physics_process(delta: float) -> void:
 
 
 func _unhandled_input(event: InputEvent) -> void:
-	if event.is_action_pressed("swing") and not stand_in:
-		if rules.state == "serve" and rules.server == "near":
-			rules.serve()
-		else:
-			player.start_swing()
-	elif event.is_action_pressed("lab_speed"):
+	if event.is_action_pressed("lab_speed"):
 		speed_i = (speed_i + 1) % SPEEDS.size()
 	elif event.is_action_pressed("stats"):
 		_set_stats(not stats_on)
@@ -179,6 +206,7 @@ func _set_stats(on: bool) -> void:
 
 
 func _process(delta: float) -> void:
+	_update_aim_visuals(delta)
 	_watch_rules()
 	for p in _pops:
 		p.age += delta
@@ -227,11 +255,20 @@ func _write_point() -> void:
 	var r = rules
 	var n: int = r.points
 	for h in r.hits:
-		_log.store_line("hit,%d,%d,%s,%s,%s,%s,%s,%.2f,%.2f,%.2f,%.2f,%.2f,%.2f,%.2f,%s,,,," % [
+		_log.store_line("hit,%d,%d,%s,%s,%s,%s,%s,%.2f,%.2f,%.2f,%.2f,%.2f,%.2f,%.2f,%s,,,,,%.2f,%.2f,%s" % [
 			n, h.shot, h.side, h.came, h.kind, h.net, h.lob,
-			h.x, h.y, h.z, h.land_x, h.land_y, h.pressure, h.strain, h.slow])
-	_log.store_line("point,%d,,,,,,,,,,,,,,,%s,\"%s\",%s,\"%s\"" % [n, r.last_winner, r.last_result, r.last_by, r.last_cause])
+			h.x, h.y, h.z, h.land_x, h.land_y, h.pressure, h.strain, h.slow,
+			h.you.x, h.you.y, _aim_columns(h)])
+	_log.store_line("point,%d,,,,,,,,,,,,,,,%s,\"%s\",%s,\"%s\",,,,,,,," % [n, r.last_winner, r.last_result, r.last_by, r.last_cause])
 	_log.flush()
+
+
+## the aim columns of a hit row: shot type, stick x and y, left stick nudge, zone x and y.
+## Only your own swings have them, the rest stay empty
+func _aim_columns(h: Dictionary) -> String:
+	if h.shot_type == "" or h.shot_type == "serve":
+		return "%s,,,,," % h.shot_type
+	return "%s,%.2f,%.2f,%.2f,%.2f,%.2f" % [h.shot_type, h.stick.x, h.stick.y, h.nudge, h.zone.x, h.zone.y]
 
 
 func _card(pos: Vector2, width: float) -> VBoxContainer:
@@ -295,7 +332,7 @@ func _update_info() -> void:
 	_score_opp.text = "OPP %d" % r.score.far
 	if r.state == "serve":
 		if r.server == "near" and not stand_in:
-			_status.text = "Your serve. Press %s" % ("A" if Controls.using_gamepad else "J")
+			_status.text = "Your serve. Press %s" % ("RT" if Controls.using_gamepad else "J")
 		else:
 			_status.text = "%s serve" % ("Near" if r.server == "near" else "Opponent's")
 	elif r.state == "play":
@@ -356,10 +393,74 @@ func _draw() -> void:
 	var z: float = clampf(rules.ball_court().z, 0.0, 4.0)
 	draw_circle(GAUGE_FLOOR - Vector2(0, z * GAUGE_PPM), 6.0, BallView.height_color(z))
 	draw_string(ThemeDB.fallback_font, top - Vector2(14, 10), "height", HORIZONTAL_ALIGNMENT_LEFT, -1, 12)
+	_draw_aim()
 	_draw_last_bounce()
 	_draw_focus()
 	if stats_on:
 		_draw_overlay()
+
+
+## what the swing would do right now: the choice for the stick as it is held
+func _aim_choice() -> Dictionary:
+	var from: Vector2 = player.pos()
+	return Planner.aim_choice(from.x, from.y, rules.aim, rules.aim_dir)
+
+
+## ease the arrow toward the thumb and the glow toward the zone, so neither jumps
+func _update_aim_visuals(delta: float) -> void:
+	var from: Vector2 = player.pos()
+	var choice := _aim_choice()
+	var k := 1.0 - exp(-AIM_SMOOTH * delta)
+	# the arrow shows the raw thumb. With nothing pushed it points at the default target
+	var target: Vector2 = rules.aim_dir if rules.aim_dir.length() > 0.0 else (choice.land - from)
+	if target.length() > 0.001:
+		_arrow = Vector2.from_angle(lerp_angle(_arrow.angle(), target.angle(), k))
+	_glow = _glow.lerp(choice.land, k)
+
+
+## the aim ring around you, with a short arrow for the thumb direction and a
+## glow on the zone the swing is aimed at (where the ball should come down).
+## The arrow and ring turn orange when the swing plays your own glass, and the
+## back of the ring lights up when your glass is close enough to play. Shown for
+## the whole point, brightest when the ball is in reach
+func _draw_aim() -> void:
+	if stand_in or rules.state != "play":
+		return
+	var from: Vector2 = player.pos()
+	var choice := _aim_choice()
+	var alpha := AIM_IDLE
+	if player.ball_in_reach:
+		alpha = 1.0
+	elif rules.playable_for("near"):
+		alpha = AIM_COMING
+	var glass: bool = choice.kind == "contra"
+	var color := AIM_GLASS if glass else YOU_COLOR
+	color.a = alpha
+	var ring := YOU_COLOR
+	ring.a = alpha
+	# the zone glow: a soft disc with a thin edge, only the landing zone, never the glass spot
+	var glow := color
+	glow.a = 0.18 * alpha
+	var at := _px(_glow)
+	draw_circle(at, GLOW_RADIUS * Court.PPM, glow)
+	glow.a = 0.5 * alpha
+	draw_arc(at, GLOW_RADIUS * Court.PPM, 0.0, TAU, 32, glow, 1.5)
+	# the ring, the lit glass arc and the arrow
+	draw_arc(_px(from), AIM_RING * Court.PPM, 0.0, TAU, 40, ring, 2.0)
+	if from.y <= Planner.CONTRA_MAX_Y:
+		var lit := AIM_GLASS
+		lit.a = alpha
+		var back := PI * 0.5   # screen down
+		var span := acos(-Planner.BACK_WEDGE)
+		draw_arc(_px(from), AIM_RING * Court.PPM, back - span, back + span, 16, lit, 5.0)
+	var dir := _arrow
+	var side := Vector2(-dir.y, dir.x)
+	var base := from + dir * AIM_RING
+	var tip := base + dir * AIM_ARROW
+	var head := tip - dir * AIM_HEAD
+	draw_line(_px(base), _px(tip), color, 3.0)
+	draw_line(_px(tip), _px(head + side * AIM_HEAD * 0.6), color, 3.0)
+	draw_line(_px(tip), _px(head - side * AIM_HEAD * 0.6), color, 3.0)
 
 
 ## the ball's last bounce: a ring that closes on the landing spot. Bright when it

@@ -18,8 +18,8 @@ const STICK_DEADZONE := 0.25
 
 const ACTIONS := {
 	# ball lab
-	"lab_next": {"keys": [KEY_RIGHT], "buttons": [JOY_BUTTON_DPAD_RIGHT, JOY_BUTTON_RIGHT_SHOULDER]},
-	"lab_prev": {"keys": [KEY_LEFT], "buttons": [JOY_BUTTON_DPAD_LEFT, JOY_BUTTON_LEFT_SHOULDER]},
+	"lab_next": {"keys": [KEY_RIGHT], "buttons": [JOY_BUTTON_DPAD_RIGHT]},
+	"lab_prev": {"keys": [KEY_LEFT], "buttons": [JOY_BUTTON_DPAD_LEFT]},
 	"lab_replay": {"keys": [KEY_SPACE], "buttons": [JOY_BUTTON_RIGHT_STICK]},
 	"lab_speed": {"keys": [KEY_T], "buttons": [JOY_BUTTON_DPAD_UP]},
 	"lab_auto": {"keys": [KEY_R], "buttons": [JOY_BUTTON_DPAD_DOWN]},
@@ -29,8 +29,16 @@ const ACTIONS := {
 	"move_right": {"keys": [KEY_D], "axis": [JOY_AXIS_LEFT_X, 1.0]},
 	"move_up": {"keys": [KEY_W], "axis": [JOY_AXIS_LEFT_Y, -1.0]},
 	"move_down": {"keys": [KEY_S], "axis": [JOY_AXIS_LEFT_Y, 1.0]},
-	# player shots. A (cross on PlayStation) or J
-	"swing": {"keys": [KEY_J], "buttons": [JOY_BUTTON_A]},
+	# aim: the right stick, any direction. No keys, the keyboard keeps the
+	# A/D nudge from the move keys
+	"aim_left": {"axis": [JOY_AXIS_RIGHT_X, -1.0]},
+	"aim_right": {"axis": [JOY_AXIS_RIGHT_X, 1.0]},
+	"aim_up": {"axis": [JOY_AXIS_RIGHT_Y, -1.0]},
+	"aim_down": {"axis": [JOY_AXIS_RIGHT_Y, 1.0]},
+	# player shots: J, the right bumper or the right trigger (R2 on PlayStation).
+	# A stays free for later shot types. The trigger is an axis, so read this
+	# action with Input.is_action_just_pressed, not event.is_action_pressed
+	"swing": {"keys": [KEY_J], "buttons": [JOY_BUTTON_RIGHT_SHOULDER], "axis": [JOY_AXIS_TRIGGER_RIGHT, 1.0]},
 	# opens and closes the match menu. Inside the menu, Godot's built-in ui_*
 	# actions move and pick (arrows or D-pad or stick, Enter or A, Esc or B)
 	"menu": {"keys": [KEY_ESCAPE], "buttons": [JOY_BUTTON_START]},
@@ -81,6 +89,12 @@ static func register() -> void:
 ## WASD or left stick as a vector, deadzone applied, length 0 to 1
 static func move_vector() -> Vector2:
 	return Input.get_vector("move_left", "move_right", "move_up", "move_down")
+
+
+## right stick as a vector, deadzone applied, length 0 to 1. Screen axes, so
+## up is negative y
+static func aim_vector() -> Vector2:
+	return Input.get_vector("aim_left", "aim_right", "aim_up", "aim_down")
 
 
 static func pad_names() -> PackedStringArray:

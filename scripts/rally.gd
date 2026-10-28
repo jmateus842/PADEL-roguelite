@@ -77,8 +77,7 @@ func try_hit() -> bool:
 		return false
 	var b := ball_court()
 	var contact := [b.x, b.y, b.z]
-	var aim_x := 5.0 + clampf(aim, -1.0, 1.0) * Planner.AIM_SPREAD
-	var shot := Planner.plan(contact, aim_x)
+	var shot := Planner.plan(contact, Planner.aim_x(aim))
 	player.used_swing()
 	ball.play(contact, shot, 1.0, false)
 	state = "return"

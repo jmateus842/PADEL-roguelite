@@ -30,6 +30,7 @@ const Planner := preload("res://scripts/shot_planner.gd")
 const Rules := preload("res://scripts/match_rules.gd")
 const Opponent := preload("res://scripts/opponent.gd")
 const Focus := preload("res://scripts/focus.gd")
+const Aim := preload("res://scripts/aim.gd")
 const GOLDEN := "res://tests/golden_random.json"
 
 ## energy may creep up a little from the step size alone, never more than this (J/kg)
@@ -265,7 +266,9 @@ func _suite_controls() -> void:
 			e.pressed = true
 			e.device = 2
 			_check(_actions_for(e, all_actions) == [action], "button %d should trigger only %s, triggers %s" % [b, action, _actions_for(e, all_actions)])
-	_check(JOY_BUTTON_A in Controls.ACTIONS.swing.buttons, "swing should be on the A button")
+	var swing: Dictionary = Controls.ACTIONS.swing
+	_check(KEY_J in swing.keys and JOY_BUTTON_RIGHT_SHOULDER in swing.buttons and swing.axis[0] == JOY_AXIS_TRIGGER_RIGHT, "swing should be on J, the right bumper and the right trigger")
+	_check(not (JOY_BUTTON_A in swing.get("buttons", [])), "A should stay free, it no longer swings")
 	_check(JOY_BUTTON_START in Controls.ACTIONS.menu.buttons and KEY_ESCAPE in Controls.ACTIONS.menu.keys, "menu should be on Start and Esc")
 	# menus pick with A and go back with B on any pad, added once even after two registers
 	for pair in [["ui_accept", JOY_BUTTON_A], ["ui_cancel", JOY_BUTTON_B]]:
@@ -284,7 +287,7 @@ func _suite_controls() -> void:
 		for b in Controls.ACTIONS[action].get("buttons", []):
 			_check(b > JOY_BUTTON_Y, "%s uses face button %d, keep those for the player" % [action, b])
 	# stick: past the deadzone moves, inside it doesn't. The left trigger is focus
-	for case in [[JOY_AXIS_LEFT_X, -0.8, "move_left"], [JOY_AXIS_LEFT_X, 0.8, "move_right"], [JOY_AXIS_LEFT_Y, -0.8, "move_up"], [JOY_AXIS_LEFT_Y, 0.8, "move_down"], [JOY_AXIS_TRIGGER_LEFT, 1.0, "focus"]]:
+	for case in [[JOY_AXIS_LEFT_X, -0.8, "move_left"], [JOY_AXIS_LEFT_X, 0.8, "move_right"], [JOY_AXIS_LEFT_Y, -0.8, "move_up"], [JOY_AXIS_LEFT_Y, 0.8, "move_down"], [JOY_AXIS_TRIGGER_LEFT, 1.0, "focus"], [JOY_AXIS_TRIGGER_RIGHT, 1.0, "swing"], [JOY_AXIS_RIGHT_X, -0.8, "aim_left"], [JOY_AXIS_RIGHT_X, 0.8, "aim_right"], [JOY_AXIS_RIGHT_Y, -0.8, "aim_up"], [JOY_AXIS_RIGHT_Y, 0.8, "aim_down"]]:
 		for device in [1, 3]:
 			var e := InputEventJoypadMotion.new()
 			e.axis = case[0]
@@ -537,7 +540,8 @@ func _suite_match() -> void:
 	var tagged := _match_overlay()
 	stats += ", %d hits tagged" % tagged
 	var rings := _match_last_bounce()
-	_summary("match: far half, lobs, shot choice, scoring, serves, opponent vs opponent, last bounce", before,
+	_match_aim_spot()
+	_summary("match: far half, lobs, shot choice, scoring, serves, opponent vs opponent, last bounce, aim line", before,
 		"(%d lobs, opponent returns %d%% of your drives, %s, %d last bounces predicted)" % [lobs, roundi(rate * 100.0), stats, rings])
 
 
@@ -676,6 +680,222 @@ func _match_nodes() -> Array:
 	var near = PlayerNode.new()
 	var far = PlayerNode.new()
 	return [ball, near, far, Rules.new(ball, near, far)]
+
+
+## the aim line on screen reads Planner.aim_x. Your real shot has to land there:
+## same sideways spot (within 0.5 m), on the far half, for every stick position
+func _match_aim_spot() -> void:
+	_check(is_equal_approx(Planner.aim_x(0.0), 5.0), "no stick should aim at the center line")
+	_check(is_equal_approx(Planner.aim_x(-1.0), 5.0 - Planner.AIM_SPREAD) and is_equal_approx(Planner.aim_x(1.0), 5.0 + Planner.AIM_SPREAD), "full stick should aim AIM_SPREAD off center")
+	_check(is_equal_approx(Planner.aim_x(3.0), Planner.aim_x(1.0)) and is_equal_approx(Planner.aim_x(-3.0), Planner.aim_x(-1.0)), "a stick past 1 should not aim further")
+	_match_aim_choice()
+	for stick in [-1.0, -0.5, 0.0, 0.5, 1.0]:
+		var n := _match_nodes()
+		var r = n[3]
+		r.state = "play"
+		r._launch("far", [5.0, 3.0, 1.0], Planner.plan([5.0, 3.0, 1.0], 5.0))
+		var hit := false
+		for i in 600:
+			if r.playable_for("near"):
+				# put the body under the ball so the swing is in reach
+				var b: Vector3 = r.ball_court()
+				n[1].reset(Vector2(b.x, minf(b.y, BallModel.NET_Y - 0.5)))
+				if not n[1].is_swinging():
+					n[1].start_swing()
+			n[1].tick(Vector2.ZERO, 1.0 / 60.0)
+			r.aim = stick
+			n[0]._physics_process(1.0 / 60.0)
+			if r.last_hitter == "near":
+				hit = true
+				break
+			if r.state == "over":
+				break
+		_check(hit, "stick %.1f: the swing never connected" % stick)
+		if hit:
+			var land := _first_bounce(n[0])
+			_check(land.y > BallModel.NET_Y, "stick %.1f: the shot landed on your own half, %s" % [stick, land])
+			_check(absf(land.x - Planner.aim_x(stick)) < 0.5, "stick %.1f: aim line says x %.2f, the shot landed at x %.2f" % [stick, Planner.aim_x(stick), land.x])
+		_match_free(n)
+
+
+## the right stick: what the swing does for each direction, and the contrapared
+## has to be a real shot (our glass first, over the net, in their box)
+func _match_aim_choice() -> void:
+	var rest := Planner.aim_choice(5.0, 2.0, 0.5, Vector2.ZERO)
+	_check(rest.kind == "drive" and is_equal_approx(rest.x, Planner.aim_x(0.5)), "a resting right stick should keep the left stick nudge")
+	var fwd := Planner.aim_choice(5.0, 2.0, 0.0, Vector2(sin(deg_to_rad(36.0)), cos(deg_to_rad(36.0))))
+	_check(fwd.kind == "drive" and fwd.land.is_equal_approx(Vector2(8.5, Planner.TARGET_DEPTH)), "right stick 36 degrees right should lock the deep-right zone, got %s" % fwd.land)
+	var side := Planner.aim_choice(5.0, 2.0, 0.0, Vector2(1.0, 0.0))
+	_check(side.kind == "drive" and side.land.is_equal_approx(Vector2(8.5, 12.0)) and is_equal_approx(side.pace, 11.0), "right stick straight right should lock the short-right zone, got %s" % side.land)
+	var back := Planner.aim_choice(5.0, 2.0, 0.0, Vector2(0.0, -1.0))
+	_check(back.kind == "contra" and is_equal_approx(back.to.y, 0.0) and back.land.is_equal_approx(Vector2(5.0, Planner.CONTRA_DEPTH)), "right stick straight back near the glass should play the glass")
+	var far_back := Planner.aim_choice(5.0, Planner.CONTRA_MAX_Y + 0.5, 0.0, Vector2(0.0, -1.0))
+	_check(far_back.kind == "drive", "right stick back with the glass out of reach should stay a drive")
+	var edge := Planner.aim_choice(5.0, 2.0, 0.0, Vector2(sin(deg_to_rad(65.0)), -cos(deg_to_rad(65.0))))
+	_check(edge.kind == "drive", "65 degrees off straight back is outside the glass wedge")
+	var inside := Planner.aim_choice(5.0, 2.0, 0.0, Vector2(sin(deg_to_rad(55.0)), -cos(deg_to_rad(55.0))))
+	_check(inside.kind == "contra", "55 degrees off straight back is inside the glass wedge")
+	_match_zones()
+	_match_aim_memory()
+	_match_drive_zones()
+	# the shot itself, from a grid of contacts near your glass
+	var made := 0
+	var tries := 0
+	var started := Time.get_ticks_msec()
+	for y in [0.6, 1.5, 2.5]:
+		for z in [0.6, 1.0, 1.5]:
+			for x in [3.0, 5.0, 7.0]:
+				for gx in [1.5, 5.0, 8.5]:
+					tries += 1
+					var c := [x, y, z]
+					var vel := Planner.plan_contrapared(c, gx)
+					if vel.is_empty():
+						continue
+					made += 1
+					var m = BallModel.new()
+					m.reset(c, vel, 1.0)
+					m.run_to_end()
+					_check(m.end == "winner: second bounce", "contrapared from %s aimed at x %.1f ended %s" % [c, gx, m.end])
+					var first_wall := ""
+					for e in m.events:
+						if e.kind == "glass" or e.kind == "mesh":
+							first_wall = "%s %s" % [e.kind, e.detail]
+							break
+					_check(first_wall == "glass back", "contrapared from %s touched %s first" % [c, first_wall])
+					for e in m.events:
+						if e.kind == "floor" and e.detail == "far":
+							_check(absf(e.x - gx) < 1.0, "contrapared from %s aimed at x %.1f landed at x %.2f" % [c, gx, e.x])
+							break
+	var ms := float(Time.get_ticks_msec() - started) / tries
+	_check(made >= tries * 0.8, "only %d of %d contrapared plans worked" % [made, tries])
+	_check(ms < 80.0, "a contrapared plan takes %.0f ms, too slow for a swing" % ms)
+	print("   contrapared: %d of %d plans, %.0f ms each" % [made, tries, ms])
+	# a real swing: a deep lob bounces near your glass. Stick back plays the glass,
+	# stick at rest plays a normal drive
+	for back_stick in [true, false]:
+		var n := _match_nodes()
+		var r = n[3]
+		r.state = "play"
+		var c := [5.0, 3.0, 1.0]
+		r._launch("far", c, Planner.plan_lob(c, 5.0))
+		var hit := false
+		for i in 900:
+			if r.playable_for("near"):
+				var b: Vector3 = r.ball_court()
+				if b.y <= Planner.CONTRA_MAX_Y:
+					n[1].reset(Vector2(b.x, b.y))
+					if not n[1].is_swinging():
+						n[1].start_swing()
+			n[1].tick(Vector2.ZERO, 1.0 / 60.0)
+			r.aim_dir = Vector2(0.0, -1.0) if back_stick else Vector2.ZERO
+			n[0]._physics_process(1.0 / 60.0)
+			if r.last_hitter == "near":
+				hit = true
+				break
+			if r.state == "over":
+				break
+		_check(hit, "back stick %s: the swing near the glass never connected" % back_stick)
+		if hit:
+			var m = n[0].model.clone()
+			m.run_to_end()
+			var first_wall := ""
+			for e in m.events:
+				if e.kind == "glass" or e.kind == "mesh":
+					first_wall = "%s %s%s" % [e.kind, e.detail, " (ours)" if e.y < BallModel.NET_Y else ""]
+					break
+			# the log record of the swing: what you pushed, the zone, and where you stood
+			var rec: Dictionary = r.hits.back()
+			_check(rec.side == "near" and rec.shot_type == ("contra" if back_stick else "nudge"), "the hit record says %s for back stick %s" % [rec.shot_type, back_stick])
+			_check(rec.stick.is_equal_approx(Vector2(0.0, -1.0) if back_stick else Vector2.ZERO), "the hit record kept the stick %s" % rec.stick)
+			_check(rec.you.distance_to(n[1].pos()) < 0.05, "the hit record has you at %s, you are at %s" % [rec.you, n[1].pos()])
+			if back_stick:
+				_check(rec.zone.is_equal_approx(Vector2(5.0, Planner.CONTRA_DEPTH)), "the hit record zone for a straight back push is %s" % rec.zone)
+			else:
+				_check(rec.zone.is_equal_approx(Vector2(Planner.aim_x(0.0), Planner.TARGET_DEPTH)), "the hit record zone for a resting stick is %s" % rec.zone)
+			if back_stick:
+				_check(first_wall == "glass back (ours)" and m.end == "winner: second bounce", "stick back should play our glass and land in, got %s, %s" % [first_wall, m.end])
+			else:
+				_check(first_wall != "glass back (ours)", "a resting stick should not play our own glass")
+		_match_free(n)
+	# from too high or too far out nothing works, and the swing falls back to a drive
+	_check(Planner.plan_contrapared([5.0, 9.0, 1.0], 5.0).is_empty(), "a contrapared from the net can't exist")
+
+
+## the zone targets: locked on each zone, a straight slide between, clamped at the ends
+func _match_zones() -> void:
+	var zones: Array = Planner.DRIVE_ZONES
+	for z in zones:
+		for off in [-Planner.ZONE_LOCK, 0.0, Planner.ZONE_LOCK]:
+			var t := Planner.zone_target(z[0] + off, zones)
+			var inside: bool = z[0] + off >= zones[0][0] and z[0] + off <= zones[zones.size() - 1][0]
+			if inside:
+				_check((t[0] as Vector2).is_equal_approx(z[1]), "%.0f degrees off zone %.0f should stay locked on it, got %s" % [off, z[0], t[0]])
+	_check((Planner.zone_target(-170.0, zones)[0] as Vector2).is_equal_approx(zones[0][1]) and (Planner.zone_target(170.0, zones)[0] as Vector2).is_equal_approx(zones[zones.size() - 1][1]), "past the outer zones the target should clamp")
+	# between two zones the target moves one way, never jumps, and never leaves the box of the two spots
+	var prev := Vector2(-1.0, -1.0)
+	var worst := 0.0
+	var a: float = zones[0][0]
+	while a <= zones[zones.size() - 1][0]:
+		var spot: Vector2 = Planner.zone_target(a, zones)[0]
+		if prev.x >= 0.0:
+			worst = maxf(worst, spot.distance_to(prev))
+			_check(spot.x >= prev.x - 1e-6, "the target went backward at %.1f degrees" % a)
+		prev = spot
+		a += 0.5
+	_check(worst < 0.5, "the target jumped %.2f m between half degree steps" % worst)
+	# the same slide for the contrapared zones
+	var cz: Array = Planner.CONTRA_ZONES
+	_check((Planner.zone_target(0.0, cz)[0] as Vector2).is_equal_approx(Vector2(5.0, Planner.CONTRA_DEPTH)), "straight back should lock the center contrapared zone")
+	var mid: Vector2 = Planner.zone_target(35.0 - Planner.ZONE_LOCK - 2.0, cz)[0]
+	_check(mid.x > 5.0 and mid.x < 8.0, "between the center and right contrapared zones should slide, got %s" % mid)
+
+
+## a flick still counts for a moment after the thumb lets go
+func _match_aim_memory() -> void:
+	var m = Aim.new()
+	var dt := 1.0 / 60.0
+	_check(m.update(Vector2.ZERO, dt) == Vector2.ZERO, "a stick that never moved should give no aim")
+	var flick := Vector2(0.6, 0.8)
+	_check(m.update(flick, dt) == flick, "a pushed stick should pass straight through")
+	var held := 0
+	for i in 20:
+		if m.update(Vector2.ZERO, dt) == flick:
+			held += 1
+	_check(absf(held * dt - Aim.MEMORY) <= dt * 1.5, "the flick should be remembered %.2f s, was %.2f s" % [Aim.MEMORY, held * dt])
+	_check(m.update(Vector2.ZERO, dt) == Vector2.ZERO, "after the memory runs out the aim should be empty")
+	# a new push replaces it, a small one inside the rest radius doesn't
+	var other := Vector2(-1.0, 0.0)
+	m.update(flick, dt)
+	m.update(other, dt)
+	_check(m.update(Vector2.ZERO, dt) == other, "the newest push should be the one remembered")
+	m.update(Vector2(0.1, 0.1), Aim.MEMORY * 2.0)
+	_check(m.update(Vector2(0.1, 0.1), dt) == Vector2.ZERO, "a push inside the rest radius should not count")
+
+
+## drives to each zone through the real model: in, near the zone spot, from all over your half
+func _match_drive_zones() -> void:
+	var tries := 0
+	var good := 0
+	for z in Planner.DRIVE_ZONES:
+		var spot: Vector2 = z[1]
+		for x in [1.5, 3.5, 5.0, 6.5, 8.5]:
+			for y in [1.0, 3.0, 5.5, 8.0]:
+				tries += 1
+				var c := [x, y, 1.0]
+				var m = BallModel.new()
+				m.reset(c, Planner.plan_to(c, spot, z[2]), 1.0)
+				var land := Vector2(-1.0, -1.0)
+				while not m.is_done() and land.x < 0.0:
+					m.step()
+					for e in m.events:
+						if e.kind == "floor":
+							land = Vector2(e.x, e.y)
+							break
+				if land.x >= 0.0 and land.y > BallModel.NET_Y and absf(land.x - spot.x) < 1.2 and absf(land.y - spot.y) < 2.0:
+					good += 1
+				else:
+					print("   zone %s from %s landed %s" % [spot, c, land])
+	_check(good >= tries * 0.95, "only %d of %d zone drives landed near their zone" % [good, tries])
 
 
 func _match_free(n: Array) -> void:
@@ -875,6 +1095,7 @@ func _match_overlay() -> int:
 			var my_y: float = h.y if h.side == "near" else BallModel.L - h.y
 			_check(h.net == (my_y >= BallModel.NET_Y - Rules.NET_ZONE), "net zone tag wrong at y %.2f" % h.y)
 			_check(h.strain >= 0.0 and h.strain <= 1.0, "a brain's hit has no strain")
+			_check(h.you is Vector2 and h.shot_type == "", "shot %d: a brain's hit should carry your position and no shot type" % h.shot)
 			if h.side == "near":
 				near_hits += 1
 				if h.net:

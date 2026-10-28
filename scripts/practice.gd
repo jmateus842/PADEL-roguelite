@@ -4,10 +4,10 @@ extends Node2D
 ##
 ##                     keyboard     gamepad
 ## move                WASD         left stick
-## swing               J            A (cross)
+## swing               J            RT or RB
 ## aim the return      hold A/D     stick left/right while you swing
 ## next feed now       Space        R3 (click the right stick)
-## pick one feed       Left/Right   D-pad left/right or LB/RB   (repeats it)
+## pick one feed       Left/Right   D-pad left/right   (repeats it)
 ## mix all feeds       R            D-pad down
 ## slow motion         T            D-pad up      1x, 0.5x, 0.25x
 ## Bindings live in scripts/controls.gd. Tuning lives in player.gd and rally.gd.
@@ -26,7 +26,7 @@ const GAUGE_FLOOR := Vector2(400, 650)
 const GAUGE_PPM := 60.0
 
 const KEY_HINT := "WASD move   J swing (hold A/D to aim)   Space next feed   Left/Right pick feed   R mix   T slow"
-const PAD_HINT := "Stick move   A swing (stick aims)   R3 next feed   D-pad/LB/RB pick feed   D-pad down mix   D-pad up slow"
+const PAD_HINT := "Stick move   RT swing (stick aims)   R3 next feed   D-pad pick feed   D-pad down mix   D-pad up slow"
 
 @onready var court: Node2D = $Court
 @onready var ball := $Court/Ball
@@ -72,6 +72,9 @@ func _feed_now() -> void:
 
 func _physics_process(delta: float) -> void:
 	# runs before the ball (a child), so the player moves first each tick
+	# swing is read as an edge: the trigger is an axis and fires while held
+	if Input.is_action_just_pressed("swing"):
+		player.start_swing()
 	var scale: float = SPEEDS[speed_i]
 	var stick := Controls.move_vector()
 	player.tick(stick, delta * scale)
@@ -85,9 +88,7 @@ func _physics_process(delta: float) -> void:
 
 
 func _unhandled_input(event: InputEvent) -> void:
-	if event.is_action_pressed("swing"):
-		player.start_swing()
-	elif event.is_action_pressed("lab_replay"):
+	if event.is_action_pressed("lab_replay"):
 		_feed_now()
 	elif event.is_action_pressed("lab_next") or event.is_action_pressed("lab_prev"):
 		# first press out of mix repeats the current feed, after that it steps
