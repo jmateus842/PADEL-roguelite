@@ -44,6 +44,10 @@ const STRAIN_FROM := 0.4
 # --- positioning ---
 ## where it waits between shots, meters from its own back wall
 const HOME_DEPTH := 2.5
+## a ball whose first bounce on our side lands nearer the net than this is
+## "short": only then may we come forward and take it before it bounces. A
+## deeper ball we let bounce and play from the back (Session 19 camping fix).
+const RUSH_Y := 14.0
 ## extra time it wants in hand before it commits to a spot, s
 const SLACK := 0.05
 ## it takes the first spot it reaches with pressure at or under this. If there's
@@ -122,6 +126,18 @@ func run_time(d: float) -> float:
 	return d / body.top_speed + body.top_speed / (2.0 * body.ACCEL)
 
 
+## where the incoming ball first lands on our half (court y). BallModel.L when it
+## never lands there (a fault or a ball that dies), which reads as deep.
+func first_land_y() -> float:
+	var sim = rules.ball.model.clone()
+	while not sim.is_done():
+		sim.step()
+	for e in sim.events:
+		if e.kind == "floor" and e.detail == "far":
+			return e.y
+	return BallModel.L
+
+
 ## step a copy of the ball ahead, pick the first spot it can make in time
 func make_plan() -> void:
 	var ball = rules.ball
@@ -133,14 +149,26 @@ func make_plan() -> void:
 	pressure = 1.0
 	var lo: Vector2 = body.bounds_lo()
 	var hi: Vector2 = body.bounds_hi()
+	# only a short incoming ball may be taken before it bounces. A deep one we
+	# let bounce and play from the back, so we stop camping the net (Session 19).
+	var rush := first_land_y() < RUSH_Y
+	var bounced := false
+	var seen := 0
 	var n := 0
 	while not sim.is_done():
 		sim.step()
 		n += 1
+		while seen < sim.events.size():
+			var e: Dictionary = sim.events[seen]
+			seen += 1
+			if e.kind == "floor" and e.detail == "far":
+				bounced = true
 		if n % 5 != 0 or not sim.crossed() or sim.is_done():
 			continue
 		if sim.z < body.BAND_LOW or sim.z > body.BAND_HIGH:
 			continue
+		if not rush and not bounced:
+			continue   # a deep ball: no volley, wait for the bounce
 		var b: Vector2 = ball.world(sim.x, sim.y)
 		# stand where the ball's shadow will be, kept inside my area
 		var spot := b.clamp(lo, hi)

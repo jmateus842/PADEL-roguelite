@@ -536,6 +536,7 @@ func _suite_match() -> void:
 	_match_shot_choice()
 	_match_points()
 	var rate := _match_return_rate()
+	_match_rush_rule()
 	var stats := _match_long_run()
 	var tagged := _match_overlay()
 	stats += ", %d hits tagged" % tagged
@@ -1066,6 +1067,41 @@ func _match_return_rate() -> float:
 	_check(rate >= 0.6, "the opponent returns only %d%% of your drives" % roundi(rate * 100.0))
 	_check(rate < 1.0, "the opponent returns every drive, you can't win a point")
 	return rate
+
+
+## Session 19 camping fix: a deep incoming ball is let to bounce (the brain stays
+## back, no net volley); a short one draws it forward. Drives the RUSH_Y gate.
+func _match_rush_rule() -> void:
+	# deep drive: first far-side bounce is well behind RUSH_Y, so no volley
+	var n := _match_nodes()
+	var r = n[3]
+	var opp = Opponent.new(r, "far", 7)
+	r.state = "play"
+	n[2].reset(opp.home())
+	r._launch("near", [5.0, 2.0, 1.0], Planner.plan([5.0, 2.0, 1.0], 5.0))
+	for i in 90:
+		n[0]._physics_process(1.0 / 60.0)
+		if n[0].model.crossed():
+			break
+	_check(opp.first_land_y() >= Opponent.RUSH_Y, "a deep drive should read as deep")
+	opp.make_plan()
+	_check(opp.stand.y > BallModel.NET_Y + 6.0, "deep drive: plans to stand at y %.2f, should stay back" % opp.stand.y)
+	_match_free(n)
+	# short ball: first far-side bounce is inside RUSH_Y, so it may rush the net
+	n = _match_nodes()
+	r = n[3]
+	opp = Opponent.new(r, "far", 7)
+	r.state = "play"
+	n[2].reset(opp.home())
+	r._launch("near", [5.0, 1.0, 1.0], Planner.plan_to([5.0, 1.0, 1.0], Vector2(5.0, 12.0), 11.0))
+	for i in 90:
+		n[0]._physics_process(1.0 / 60.0)
+		if n[0].model.crossed():
+			break
+	_check(opp.first_land_y() < Opponent.RUSH_Y, "a short ball should read as short")
+	opp.make_plan()
+	_check(opp.stand.y < BallModel.NET_Y + 6.0, "short ball: plans to stand at y %.2f, should come forward" % opp.stand.y)
+	_match_free(n)
 
 
 ## the data behind the overlay and the log, from 40 points of opponent vs opponent
