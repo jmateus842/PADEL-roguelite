@@ -2,10 +2,10 @@
 
 Log of ongoing work and decisions, so a new session can pick up where the last one stopped. Format: `rules/template-session.md`.
 
-## Project status (as of 2026-10-27)
+## Project status (as of 2026-10-30)
 
-* **Current priority:** playtest the last-bounce ring and the L2 slow-mo (Session 17) together with the 6 m lob trigger (about 30 points of log, only 5 so far), then design how the player chooses to use the wall (`design/padel-wall-situations.md`), then shot buttons with contact quality. Plan and order in `design/glass-panels.md`. Run `run_tests.bat` after every change to the ball, player, rally or opponent.
-* **Playcentric step:** 5. Playtest 1 done (Session 15), a short playtest 2 of the wider lob trigger done (Session 16). Back to step 4 changes the playtest asked for, one per playtest. Session 17 added two at once (ring and slow-mo), so read the log for slow-mo use before judging the lob trigger.
+* **Current priority:** stop the opponent camping on deep center (playtest 4, Session 19: it volleyed 7 of your 9 middle shots from about 5 m off its net and won 2 points that way). Make that one change, playtest 30+ points, then step 3 of the aim design: contact timing bands with deterministic errors and an EARLY/LATE mark, which is what makes waiting for the wall worth it. Solo is the main mode, so the run layer (upgrades and curses that change assist) comes after that. Run `run_tests.bat` after every change to the ball, player, rally or opponent.
+* **Playcentric step:** 5. Playtests 1 to 4 done (Sessions 15, 16, 18, 19). Back to step 4 changes the playtest asked for. Session 18 changed aim and the swing button at once, so judge the 6 m lob trigger from its own numbers (see the Session 18 entry).
 * **Known blockers:** None.
 * **Active known issues:**
     * Padel origin and Balatro release date in the goals doc came from memory and still need checking (from Session 1).
@@ -14,14 +14,146 @@ Log of ongoing work and decisions, so a new session can pick up where the last o
     * **Ready to test: volley vs. bounce.** The opponent now lobs when you stand within 3.5 m of the net, and the match HUD counts your volleys, bounce hits and glass hits. Run the Session 8 protocol in the match (from Session 7, opponent in Session 10).
     * Playtest 1 (Session 15): you volley 68 of 110 shots and play 4 off the glass, the opponent never lobs you (your volleys sit 4.4 m from the net, outside its 3.5 m trigger), and nobody ever misses a shot. Every swing makes a perfect shot. See `design/glass-panels.md`.
     * Playtest 2 (Session 16), only 5 points: with `LOB_WHEN` at 6 m the opponent lobbed 3 times and 5 of your 22 shots came off the glass (23%, was 4%). Lobs won no point. Too small to settle anything. Committed (1e26de5) but still on trial: revert `LOB_WHEN` to 3.5 or try a value in between if the net feels locked.
-    * **Ready to test: last-bounce ring and slow-mo (Session 17).** A ring on the court shows where the ball lands on its last bounce. Hold L2 (Shift on keyboard) to slow the world to 0.4x while you move at 0.6x. Numbers in `scripts/focus.gd` are guesses (3 s of slow-mo, 10 s refill). Not played by hand yet, and the L2 binding was only checked with fake events, not a real trigger.
+    * **Last-bounce ring and slow-mo (Session 17).** A ring on the court shows where the ball lands on its last bounce. Hold L2 (Shift on keyboard) to slow the world to 0.4x while you move at 0.6x. Numbers in `scripts/focus.gd` are guesses (3 s of slow-mo, 10 s refill). In the newest log (Session 18) slow-mo was on for 9 of your 43 shots across 3 of 7 points, and 0 of 33 in the older log. It is used, so tune the meter from the next log.
+    * **Ready to test: right-stick aim, zones and contrapared (Session 18).** Swing is on RT or RB. The right stick aims, zones lock at 12 degrees and slide between, and a back push within 3 m of your glass plays a contrapared. In the first log with the new columns (7 points) you used drives and the resting-stick nudge, never the contrapared. Playtest 4 (Session 19) has the first match contrapared: it landed deep (y 15.65), then the opponent volleyed it as a lob and won. Short zones still never picked. The contrapared plan costs about 16 to 54 ms in the test runner, so a small hitch is possible at that swing.
+    * **The opponent camps near the net and volleys deep-center balls (Session 18, old-build log of 6 points).** It won 3 of 4 points off your deep-center drives and contrapared-like shots with a volley from about 14 m. When you stood inside its 6 m zone it lobbed every time (6 of 6 in the newer log), so the lob trigger works.
+    * **Camping confirmed in the current build (Session 19, playtest 4, 6 points).** It volleyed 7 of your 9 middle shots, all down the line from 14.6 to 15 m. Corner drives mostly got a bounce reply. It also volleyed your one contrapared. This is now the main way you lose.
+    * The opponent whiffed on "easy" balls in 3 of 7 points of playtest 3, the Session 11 complaint again. Playtest 4 had 0 whiffs (you lost 0 to 6). Sample is small. Watch it.
+    * **Serve points (Session 19).** 2 of 6 points in playtest 4 ended on the serve: their return of your serve (point 1) and their serve (point 4). Session 15 saw 4 such points too. The log can't say why yet.
     * Match rules are simplified: the serve changes sides every point, serves are auto-aimed into the box (no service faults), and the score is a plain point count (from Session 10).
 * **Technical debt:**
     * A GDScript runtime error inside the suite prints SCRIPT ERROR but doesn't fail the run. Session 14 hit one that only showed in the log. Make the runner fail on it (from Session 14).
     * The `SHOTS` table lives in both `sim/wall_shots.py` and `scripts/shots.gd`. `tests/test_sim.py` now fails if they differ, so drift gets caught, but you still edit both (from Session 3).
     * `shot_planner.gd` (moved out of `rally.gd`, now shared by you, the opponent and the practice court) plans shots with its own light copy of the ball's flight (drag, gravity, net). Change the model's tuning and the planner drifts. The return and lob grid tests catch it (from Session 7, moved in Session 10).
+    * `tests/godot_tests.gd` never loads `scripts/match.gd` or `practice.gd` (the Controls autoload isn't there in the test runner), so a parse error in them passes silently. Session 18 hit one and found it only by rendering. Open the three scenes headless after changing them (from Session 18).
+    * The practice court still aims with the left-stick nudge only and has no right-stick aim (from Session 18).
     * The practice court and the match reuse the `lab_*` actions (Space, T, R, arrows). The match uses `lab_speed` for slow motion, so a second scene needs them now. Rename to shared names soon. `lab_replay` moved from Start to R3 when Start became the menu (from Session 7, Session 11).
     * `tests/golden_random.json` is tracked but rewritten on every test run. Runs on different machines change the last digit of some floats, so git shows it as modified. Harmless (the Godot check allows 1e-9 m), but decide whether to gitignore it (from Session 9).
+
+---
+
+## 2026-10-30 (Session 19) – Playtest 4: you play from the back but skip the glass, the opponent camps on center [Playtest]
+
+### Handoff
+
+* **Result:** playtest 4 is logged (6 points, you 0 and the opponent 6). You barely volley now (3 of 24 shots, was 32 of 43), but you hit every ball after the bounce and before the glass (0 glass hits). The opponent volleys your middle shots from near its net and wins with them.
+* **Why it matters:** "walls feel like a tool" still fails. The 6 m lob trigger pushed you off the net, but nothing rewards waiting for the glass yet. The camping opponent turns every center ball into a free volley, which would hide whether timing bands work.
+* **Next recommended action:** make the opponent stop camping on deep center (Session 18 follow-up 3), one change, then playtest 30+ points. Timing bands come after.
+
+### Accomplished
+
+* Read the log `logs/match_2026-10-30T07-38-53.csv` (local, gitignored) with a script. Build: Session 18 (right-stick aim, zones, contrapared, `LOB_WHEN` 6 m).
+* Points: 0 to 6. Causes: their line 3, their cross 1, they lobbed you at the net 1, their serve 1.
+* Your 24 shots (serves left out):
+    * Came: 21 after the bounce, 3 volleys, 0 off the glass.
+    * Type: 19 drives, 4 resting-stick nudges, 1 contrapared.
+    * Contact distance from the net: 4.7 to 8.2 m, most between 7 and 7.6 m.
+    * Zones aimed: deep center (5.0) 6 times, deep right (8.5) 5, deep left (1.5) 2, the rest slid between. No short zone.
+    * Slow-mo on for 8 of 24 shots (playtest 3: 9 of 43).
+* Opponent's 27 shots: 17 after the bounce, 9 volleys, 1 off the glass, 1 lob.
+* Camping: after your 9 middle shots it volleyed 7, all down the line from y 14.6 to 15.0 (about 5 m off its net). Points 2 and 5 ended that way.
+* First contrapared in a match (point 3): played from y 0.88, landed y 15.65, so the planner works by hand. You then moved up to y 4.18 (5.8 m off the net, inside the 6 m zone). The opponent volleyed it as a lob from y 13.94 and won the point.
+* Serve: point 1 lost to the return of your serve, point 4 straight off its serve.
+
+#### Against the experience goals
+* "Walls feel like a tool": fails. 0 glass hits by you. One contrapared was played, and the opponent punished it.
+* The 6 m lob trigger did its job: you stayed back and it only needed 1 lob.
+
+### Verified
+
+* Numbers above come from a Python script over the CSV, not from reading by eye.
+* Nothing built this session, so no tests run.
+* 6 points is a small sample. Treat the trends as hints.
+
+### Deferred / Follow-up
+
+1. Opponent: stop camping on deep center. Options to weigh: it steps back after its own deep shot, or its volley from the net zone gets worse (slower, more spray) on a ball at your feet, or it only rushes the net after a short ball. Pick one.
+2. Step 3: contact timing bands with EARLY/LATE (Session 18 follow-up 2). That's what makes waiting for the glass pay.
+3. Opponent should punish a slow high contrapared with a smash, not a lob volley (Session 18 follow-up 3).
+4. Serve losses: log why the serve or the return wins (speed, placement, your position).
+5. Session 18 follow-ups 4 to 6 still open (slow-mo tuning, run layer, contrapared landing marker).
+
+### Files Touched
+
+* `progress.md` — **Edit** — this entry and status block
+
+### Status Update
+
+* Date to 2026-10-30. Priority now starts with the camping fix, then timing bands. Playcentric step notes playtest 4. Known issues gained the confirmed camping, the first match contrapared, the serve points, and 0 whiffs in playtest 4.
+
+---
+
+## 2026-10-27 (Session 18) – Right-stick aim with zones and a contrapared, swing on RT [Input] [Prototype] [Playtest]
+
+### Handoff
+
+* **Result:** the right stick now aims in 360 degrees and the swing is on RT or RB. A ring around you shows an arrow for the thumb and a glow on the zone the swing aims at, for the whole point. Pushing the stick back within 3 m of your own glass plays a contrapared off the back wall. Each hit in the log now has your position, the stick and the zone.
+* **Why it matters:** the walls were unused because every swing made the same shot and you could not choose to use your own glass. The aim design from JD's assistant (zones, aim memory, contrapared) is the base for contact timing bands, which are what make waiting for the wall worth it.
+* **Next recommended action:** play 30+ points, push the stick back near your glass a few times, and send the newest log. Then build step 3 (timing bands, EARLY/LATE).
+
+### Accomplished
+
+* `scripts/controls.gd`: new `aim_left/right/up/down` on the right stick axes and `Controls.aim_vector()`. `swing` is J, RB and the right trigger. A is free for later shot types. RB left the lab's shot picker (D-pad only). The keyboard has no 360 aim, only the A/D nudge.
+* `scripts/aim.gd` — **New**: aim memory. A flick counts for 0.12 s after the thumb rests, then the left-stick nudge applies again. A resting stick never means contrapared.
+* `scripts/shot_planner.gd`:
+    * `DRIVE_ZONES` (5: short left, deep left, deep center, deep right, short right) and `CONTRA_ZONES` (3), `ZONE_LOCK` 12 degrees. `zone_target()` locks on a zone, slides between two, clamps at the ends. No randomness.
+    * Short zones use 11 m/s. `plan_to()` falls back to the normal pace when the slow one can't clear the net, so a few short shots from right at the net land about 2 m deep.
+    * `aim_choice()` is the one place that decides what the swing does. The match and the arrow both read it, so they can't disagree.
+    * `plan_contrapared()` tries a few paces and angles with the real ball model, keeps the one landing nearest 15 m, then moves the glass spot to fix the sideways landing. The stick picks where the ball comes down, and the planner works out the glass spot, because a ball hit at an angle off the glass keeps its sideways speed and ends in the side wall.
+* `scripts/match_rules.gd`: `try_hit` uses `aim_choice`. A contrapared that can't be planned becomes a drive to the same side. Hit records carry `you`, `shot_type`, `stick`, `nudge` and `zone`.
+* `scripts/match.gd`: ring drawn the whole point (bright in reach, dim otherwise), arrow follows the smoothed raw thumb, a glow slides over the target landing zone (orange for the glass), the back of the ring lights orange when your glass is close. Swing is read as a press edge, since the trigger is an axis. Log gains 8 columns: `you_x, you_y, shot_type, stick_x, stick_y, nudge, zone_x, zone_y`.
+* `scripts/practice.gd`, `scripts/ball_lab.gd`: swing edge on RT, hints updated.
+
+#### Decisions
+* Solo is the main mode. PvP is later or never. So the "hide the arrow before contact" idea from the assistant's design is not built: it only matters when there is someone to bluff.
+* Zones are sticky then slide (JD's choice), not a hard snap. The lock acts as the hysteresis.
+* A no longer swings. Replaces the Session 7 decisions "swing on J and A" and "return auto-aimed, stick picks left, center or right".
+* The stick chooses the landing zone, never the glass spot. The planner derives the glass spot.
+* The aim design came from JD's assistant. It is not saved in the repo. Step 3 (timing bands, EARLY/LATE) and the run layer are not built.
+
+### Verified
+
+* `python tests/test_sim.py` and the Godot suite on Windows: all good, 28,812 Godot checks (up from 27,694). New checks cover the swing and right-stick bindings, aim memory, zone locking and sliding, 5 drive zones through the real model (95% land near their zone), 81 contrapared plans (all in, within 1 m of the target, off your glass first), a real swing near the glass logging `contra`, and the hit record fields.
+* Planted a sign flip in the zone angle: 2 failures. Flipped the stick sign in the swing: 4 failures. Restored both.
+* Rendered frames with the ring and no ball coming, the arrow at several stick angles, glow on each zone spot, orange arrow and glow near the glass. Opened all three scenes headless with no errors. A headless watch match wrote 36 log rows, all 28 columns.
+* JD played 7 points on a controller with this build: RT swings and the right stick aim worked (the log has stick values).
+* Not verified: a contrapared in a real match (none in the log), the short zones by hand (one shot slid toward short left), how the 16 to 54 ms contrapared plan feels, the 12 degree lock and 0.12 s memory (guesses).
+
+#### Playtest 3 (log `match_2026-10-27T20-59-35.csv`, 7 points, you 3 and the opponent 4)
+
+* Your 43 shots: 25 drives, 18 resting-stick nudge, 0 contrapared. Aimed zones mostly center (5.0) and the corners (1.5, 8.5), a few in between. Crosses 7 of 43 (the older log had 0 of 33).
+* 32 of your 43 shots were volleys, 6 after the bounce, 5 off the glass. The volley habit is still there ("walls feel like a tool" is not met yet).
+* The opponent lobbed 6 times, all 6 while you stood inside its 6 m zone, so the Session 16 trigger works. Earlier missing lobs came from you stepping back before its hit.
+* You lost 2 points to its crosses and 2 to lobs at the net. All 3 of your wins were whiffs on "easy" balls.
+* Older log `match_2026-10-27T20-15-05.csv` (previous build, 6 real points, no slow-mo; the rest of that file is idle auto-served points while the game stayed open): the opponent volleyed your deep-center drives from about 14 m for winners, and 3 of 4 contrapared-looking shots (landing y 14 to 15 from your back glass) were answered with a volley.
+
+### Deferred / Follow-up
+
+1. Play and send a log. Look at `shot_type` for contrapared use and `zone_y` for short zones.
+2. Step 3: contact timing bands (clean, slightly off, badly off, way off), a fixed error direction per early or late contact, narrower windows for riskier zones, an EARLY/LATE mark.
+3. The opponent has to punish a slow high contrapared (it volleys from the net but never smashes) and should not camp on deep center.
+4. Slow-mo is used a little (9 of 43 shots in the newest log). Read when, then tune `scripts/focus.gd`.
+5. The run layer: upgrades and curses for assist (wider lock, a trajectory preview, manual aim, no aim memory). Solo is the main mode.
+6. Optional: a marker for the landing spot of a contrapared, since the arrow points at the glass and the sideways choice shows only as a slight tilt.
+
+### Files Touched
+
+* `scripts/aim.gd` (plus `.uid`) — **New** — aim memory
+* `scripts/controls.gd` — **Edit** — aim actions, swing on RT and RB, lab off the shoulders
+* `scripts/shot_planner.gd` — **Edit** — zones, `aim_choice`, `plan_to`, `plan_contrapared`
+* `scripts/match_rules.gd` — **Edit** — swing uses the zones, hit record fields
+* `scripts/match.gd` — **Edit** — ring, arrow, glow, swing edge, log columns, hints
+* `scripts/practice.gd`, `scripts/ball_lab.gd`, `scripts/rally.gd` — **Edit** — swing edge, hints, shared aim function
+* `tests/godot_tests.gd` — **Edit** — controls, memory, zones, contrapared, record checks
+* `progress.md` — **Edit** — this entry and status block
+
+### Commits
+
+* `9120b98` — the aim work, controls and log columns. `desktop.ini` left untracked on purpose. Nothing pushed.
+
+### Status Update
+
+* Priority moved to playing the aim and then timing bands. Added the Session 18 known issues (aim ready to test, the camping opponent and easy whiffs) and reworded the slow-mo item with the new log numbers and two technical debt items (scene scripts not loaded by tests, practice court has no right-stick aim). Playcentric step notes playtest 3.
 
 ---
 
